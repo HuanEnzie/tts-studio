@@ -13,7 +13,22 @@ App desktop (Electron) tạo Text-to-Speech hàng loạt bằng **Gemini TTS**, 
 - **Tên file theo ngày:** folder `{YYYY-MM-DD}_{Tên dự án}/`, mẫu tên file với biến `{date} {datetime} {project} {index} {slug} {voice}` + xem trước.
 - **UI hiện đại:** dark-first, accent gradient tím→xanh, glassmorphism, micro-interaction (Framer Motion). Phím tắt: `Ctrl+1..4` chuyển mục, `Esc` quay lại.
 
-## Yêu cầu
+## Tải về & cài đặt (người dùng cuối)
+
+Vào trang **[Releases](https://github.com/HuanEnzie/tts-studio/releases)** → tải file `TTS Studio-Setup-x.y.z.exe` → chạy → cài như app bình thường (có thể chọn thư mục, tạo shortcut desktop). Không cần cài Node hay công cụ kỹ thuật nào.
+
+## Phát hành phiên bản mới (dev)
+
+Installer được build tự động trên GitHub Actions khi đẩy một tag:
+
+```bash
+npm version patch        # tăng version + tạo commit + tag
+git push --follow-tags   # đẩy code + tag -> CI build & tạo Release kèm .exe
+```
+
+(Build cục bộ trên Windows cần bật **Developer Mode** để electron-builder tạo được symlink khi giải nén công cụ ký số — vì vậy nên để CI build.)
+
+## Yêu cầu (chạy/dev)
 - Node.js 20+ (đã test trên Node 24)
 - API key Gemini (model mặc định `gemini-3.1-flash-tts-preview`)
 
