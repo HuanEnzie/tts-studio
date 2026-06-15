@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { FolderOpen, Plus, Trash2, BookA } from 'lucide-react'
+import { FolderOpen, Plus, Trash2, BookA, Plug, Loader2, CheckCircle2, XCircle } from 'lucide-react'
 import { Button } from '../design/Button'
 import { Card } from '../design/Card'
 import { PageHeader } from '../design/PageHeader'
@@ -12,6 +12,21 @@ import { VOICES, TTS_MODELS, type AppSettings, type DictEntry } from '@shared/ty
 export function Settings() {
   const [s, setS] = useState<AppSettings | null>(null)
   const [dict, setDict] = useState<DictEntry[]>([])
+  const [testing, setTesting] = useState(false)
+  const [testRes, setTestRes] = useState<{ ok: boolean; message: string } | null>(null)
+
+  const runTest = async () => {
+    setTesting(true)
+    setTestRes(null)
+    try {
+      const r = await ipc.diag.test()
+      setTestRes({ ok: r.ok, message: r.message })
+    } catch (e) {
+      setTestRes({ ok: false, message: (e as Error).message })
+    } finally {
+      setTesting(false)
+    }
+  }
 
   useEffect(() => {
     ipc.settings.get().then(setS)
@@ -66,6 +81,19 @@ export function Settings() {
         <Field label="Proxy URL">
           <Input value={s.proxyUrl} onChange={(e) => patch({ proxyUrl: e.target.value })} placeholder="http://user:pass@host:port" />
         </Field>
+
+        <div className="flex items-center gap-3">
+          <Button variant="secondary" disabled={testing} icon={testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plug className="h-4 w-4" />} onClick={runTest}>
+            {testing ? 'Đang kiểm tra…' : 'Kiểm tra kết nối'}
+          </Button>
+          {testRes && (
+            <span className={'flex items-center gap-1.5 text-sm ' + (testRes.ok ? 'text-status-done' : 'text-status-error')}>
+              {testRes.ok ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+              {testRes.message}
+            </span>
+          )}
+        </div>
+        <p className="-mt-1 text-xs text-ink-faint">Gọi thử 1 request TTS để báo: key hợp lệ chưa, có bị chặn vùng (geo) không. Tốn 1 request.</p>
       </Card>
 
       <Card className="flex flex-col gap-4 p-5">

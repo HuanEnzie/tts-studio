@@ -4,7 +4,7 @@ import { rm } from 'fs/promises'
 import { join } from 'path'
 import { store } from '../services/store'
 import { encrypt, decrypt, maskKey } from '../services/crypto'
-import { validateKey } from '../services/gemini'
+import { validateKey, synthesize, TtsError } from '../services/gemini'
 import { quotaSummary, remainingToday, synthOne } from '../services/engine'
 import {
   startBatch,
@@ -144,6 +144,49 @@ export function registerIpc(): void {
   // ---- quota ----
   h('quota:summary', () => quotaSummary())
   h('quota:remaining', () => remainingToday())
+
+  // ---- diagnostics ----
+  // One end-to-end check: key auth (ListModels) + a real TTS call to detect
+  // geo-block / ban / quota. Uses the current proxy + model settings.
+  h('diag:test', async () => {
+    const s = store()
+    const active = s.keys.filter((k) => k.active)
+    if (active.length === 0) {
+      return { ok: false, kind: 'no-key', message: 'Chưa có API key nào đang bật.' }
+    }
+    const key = decrypt(active[0].enc)
+    const authed = await validateKey(key, s.settings.proxyUrl)
+    if (!authed) {
+      return { ok: false, kind: 'auth', message: 'Key đầu tiên không xác thực được (sai key hoặc bị chặn auth).' }
+    }
+    try {
+      await synthesize({
+        text: 'Xin chào',
+        voice: s.settings.defaultVoice,
+        model: s.settings.model,
+        apiKey: key,
+        proxyUrl: s.settings.proxyUrl
+      })
+      return {
+        ok: true,
+        kind: 'ok',
+        message: `Kết nối OK — tạo TTS được với ${s.settings.model}${s.settings.proxyUrl ? ' (qua proxy)' : ''}.`
+      }
+    } catch (e) {
+      if (e instanceof TtsError) {
+        if (e.geoBlocked) return { ok: false, kind: 'geo', message: e.message }
+        if (e.forbidden) return { ok: false, kind: 'forbidden', message: e.message }
+        if (e.quotaHit)
+          return {
+            ok: true,
+            kind: 'quota',
+            message: 'Key OK, không bị chặn vùng — nhưng key này đã hết quota hôm nay.'
+          }
+        return { ok: false, kind: 'error', message: e.message }
+      }
+      return { ok: false, kind: 'error', message: (e as Error).message }
+    }
+  })
 
   // ---- projects ----
   h('projects:list', () =>

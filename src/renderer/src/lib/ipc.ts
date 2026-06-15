@@ -46,6 +46,10 @@ export const ipc = {
     summary: () => inv<QuotaSummary>('quota:summary'),
     remaining: () => inv<number>('quota:remaining')
   },
+  diag: {
+    test: () =>
+      inv<{ ok: boolean; kind: string; message: string }>('diag:test')
+  },
   projects: {
     list: () => inv<Project[]>('projects:list'),
     get: (id: string) => inv<Project | null>('projects:get', { id }),
