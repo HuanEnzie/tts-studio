@@ -1,6 +1,9 @@
 // Gemini TTS REST client. Returns raw PCM (24kHz/16-bit/mono) decoded from the
 // inlineData base64. See electron/core/wav.ts to wrap it for playback.
-import { ProxyAgent } from 'undici'
+// NOTE: `undici` is type-only here and lazy-loaded at call time. Importing it at
+// module load crashes on Electron's Node runtime (undici needs a newer Node);
+// we only ever load it when a proxy is actually configured.
+import type { ProxyAgent } from 'undici'
 
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models'
 
@@ -22,15 +25,25 @@ export class TtsError extends Error {
 
 // cache one dispatcher per proxy url so we don't rebuild it on every request
 const proxyAgents = new Map<string, ProxyAgent>()
-function dispatcherFor(proxyUrl?: string): ProxyAgent | undefined {
-  const url = (proxyUrl ?? '').trim()
-  if (!url) return undefined
-  let agent = proxyAgents.get(url)
+let undiciMod: typeof import('undici') | null = null
+
+// Fetch via the global fetch normally; only when a proxy is set do we lazy-load
+// undici and route through its ProxyAgent (and its own fetch, to keep versions
+// consistent). Returns a Response-compatible object either way.
+async function proxyFetch(
+  url: string,
+  init: RequestInit,
+  proxyUrl?: string
+): Promise<Response> {
+  const u = (proxyUrl ?? '').trim()
+  if (!u) return fetch(url, init)
+  if (!undiciMod) undiciMod = await import('undici')
+  let agent = proxyAgents.get(u)
   if (!agent) {
-    agent = new ProxyAgent(url)
-    proxyAgents.set(url, agent)
+    agent = new undiciMod.ProxyAgent(u)
+    proxyAgents.set(u, agent)
   }
-  return agent
+  return undiciMod.fetch(url, { ...init, dispatcher: agent } as never) as unknown as Response
 }
 
 interface SynthOpts {
@@ -63,17 +76,19 @@ export async function synthesize(opts: SynthOpts): Promise<Buffer> {
 
   let res: Response
   try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': opts.apiKey
+    res = await proxyFetch(
+      url,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': opts.apiKey
+        },
+        body: JSON.stringify(body),
+        signal: opts.signal
       },
-      body: JSON.stringify(body),
-      signal: opts.signal,
-      // undici accepts a dispatcher to route through a proxy (not in TS types)
-      dispatcher: dispatcherFor(opts.proxyUrl)
-    } as RequestInit)
+      opts.proxyUrl
+    )
   } catch (e) {
     // network failure — worth retrying with another key / later
     throw new TtsError(`Lỗi mạng: ${(e as Error).message}`, 0, true, false)
@@ -109,10 +124,11 @@ export async function synthesize(opts: SynthOpts): Promise<Buffer> {
 /** Lightweight validity check for a key: returns true if the key authenticates. */
 export async function validateKey(apiKey: string, proxyUrl?: string): Promise<boolean> {
   try {
-    const res = await fetch(`${ENDPOINT}?key=${encodeURIComponent(apiKey)}`, {
-      method: 'GET',
-      dispatcher: dispatcherFor(proxyUrl)
-    } as RequestInit)
+    const res = await proxyFetch(
+      `${ENDPOINT}?key=${encodeURIComponent(apiKey)}`,
+      { method: 'GET' },
+      proxyUrl
+    )
     return res.ok
   } catch {
     return false
