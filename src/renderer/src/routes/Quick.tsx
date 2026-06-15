@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Zap, Download, Loader2, Sparkles } from 'lucide-react'
 import { Button } from '../design/Button'
 import { Card } from '../design/Card'
 import { PageHeader } from '../design/PageHeader'
+import { Field, Input } from '../design/Input'
 import { AudioPlayer } from '../components/AudioPlayer'
 import { ipc } from '../lib/ipc'
 import { useQuota } from '../store/quota'
@@ -17,9 +18,21 @@ export function Quick() {
   const [text, setText] = useState('')
   const [voice, setVoice] = useState('Kore')
   const [style, setStyle] = useState('')
+  const [instruction, setInstruction] = useState('')
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<{ id: string; src: string } | null>(null)
   const refreshQuota = useQuota((s) => s.refresh)
+
+  // load the saved voice instruction once
+  useEffect(() => {
+    ipc.settings.get().then((s) => {
+      setInstruction(s.voiceInstruction)
+      setVoice(s.defaultVoice)
+    })
+  }, [])
+
+  // persist the instruction so it is remembered next time
+  const saveInstruction = () => ipc.settings.set({ voiceInstruction: instruction })
 
   const chars = text.length
   const reqs = Math.max(1, Math.ceil(chars / 1500))
@@ -29,7 +42,7 @@ export function Quick() {
     setBusy(true)
     setResult(null)
     try {
-      const { id, wavBase64 } = await ipc.quick.synth(text, voice, style)
+      const { id, wavBase64 } = await ipc.quick.synth(text, voice, style, instruction)
       setResult({ id, src: `data:audio/wav;base64,${wavBase64}` })
       refreshQuota()
     } catch (e) {
@@ -64,6 +77,11 @@ export function Quick() {
           <span className="tnum text-xs text-ink-faint">{chars} ký tự · ~{reqs} request</span>
         </div>
       </Card>
+
+      {/* voice instruction (saved) */}
+      <Field label="Yêu cầu giọng (được lưu lại)" hint="Mô tả giọng mong muốn — giữ cố định để đồng nhất. VD: giọng nam miền Bắc, truyền cảm, phù hợp video TVC.">
+        <Input value={instruction} onChange={(e) => setInstruction(e.target.value)} onBlur={saveInstruction} placeholder="VD: Giọng nam miền Bắc, trầm ấm, truyền cảm, phù hợp quảng cáo TVC." />
+      </Field>
 
       {/* style presets */}
       <div className="flex flex-col gap-2">

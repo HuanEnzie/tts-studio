@@ -72,8 +72,8 @@ export const ipc = {
       window.api.on('batch:update', (u) => cb(u as BatchUpdate))
   },
   quick: {
-    synth: (text: string, voice: string, style: string) =>
-      inv<{ id: string; wavBase64: string }>('quick:synth', { text, voice, style }),
+    synth: (text: string, voice: string, style: string, instruction: string) =>
+      inv<{ id: string; wavBase64: string }>('quick:synth', { text, voice, style, instruction }),
     save: (id: string, suggested: string, format: 'mp3' | 'wav') =>
       inv<string | null>('quick:save', { id, suggested, format })
   },

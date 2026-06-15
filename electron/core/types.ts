@@ -35,6 +35,9 @@ export interface Row {
 export interface ProjectSettings {
   voice: string
   style: string
+  /** Free-text delivery brief applied to every row, e.g. "giọng nam miền Bắc,
+   * truyền cảm, phù hợp video TVC". Steers tone/accent/pace of the chosen voice. */
+  voiceInstruction: string
   format: 'mp3' | 'wav'
   filenameTemplate: string
 }
@@ -62,9 +65,14 @@ export interface AppSettings {
   model: string
   defaultVoice: string
   defaultStyle: string
+  /** Default delivery brief used by Quick mode and seeded into new projects. */
+  voiceInstruction: string
   filenameTemplate: string
   dailyLimitPerKey: number
   format: 'mp3' | 'wav'
+  /** Optional HTTP/HTTPS proxy (e.g. http://user:pass@host:port) to route
+   * Gemini calls through a supported region when the local IP is geo-blocked. */
+  proxyUrl: string
 }
 
 export interface KeyView {
@@ -93,10 +101,15 @@ export const VOICES = [
 
 export const DEFAULT_SETTINGS: AppSettings = {
   outputRoot: '',
-  model: 'gemini-3.1-flash-tts-preview',
+  model: 'gemini-2.5-flash-preview-tts',
   defaultVoice: 'Kore',
   defaultStyle: '',
+  voiceInstruction: '',
   filenameTemplate: '{date}_{project}_{index}_{slug}',
   dailyLimitPerKey: 10,
-  format: 'mp3'
+  format: 'mp3',
+  proxyUrl: ''
 }
+
+/** Model ids superseded by the verified-working default; migrated on load. */
+export const LEGACY_TTS_MODELS = ['gemini-3.1-flash-tts-preview']

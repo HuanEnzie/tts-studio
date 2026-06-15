@@ -17,6 +17,8 @@ import { writeAudio } from '../services/audio'
 import { pcmToWavBuffer } from '../services/audio'
 import { pacificDateString } from '../core/pacific'
 import { buildFilename, projectFolderName } from '../core/filename'
+import { buildSpokenPrompt } from '../core/prompt'
+import { applyDictionary } from '../core/dictionary'
 import {
   DEFAULT_SETTINGS,
   type Project,
@@ -44,6 +46,7 @@ function defaultProjectSettings(): ProjectSettings {
   return {
     voice: s.defaultVoice,
     style: s.defaultStyle,
+    voiceInstruction: s.voiceInstruction,
     format: s.format,
     filenameTemplate: s.filenameTemplate
   }
@@ -135,7 +138,7 @@ export function registerIpc(): void {
   h('keys:validate', async (p: { id: string }) => {
     const k = store().keys.find((x) => x.id === p.id)
     if (!k) return false
-    return validateKey(decrypt(k.enc))
+    return validateKey(decrypt(k.enc), store().settings.proxyUrl)
   })
 
   // ---- quota ----
@@ -258,8 +261,9 @@ export function registerIpc(): void {
   })
 
   // ---- quick ----
-  h('quick:synth', async (p: { text: string; voice: string; style: string }) => {
-    const text = p.style ? `${p.style}: ${p.text}` : p.text
+  h('quick:synth', async (p: { text: string; voice: string; style: string; instruction?: string }) => {
+    const dictText = applyDictionary(p.text, store().dictionary)
+    const text = buildSpokenPrompt({ instruction: p.instruction, style: p.style, text: dictText })
     const pcm = await synthOne(text, p.voice)
     const id = randomUUID()
     quickCache.set(id, pcm)

@@ -72,6 +72,7 @@ export async function synthOne(
   const s = store()
   const model = s.settings.model
   const limit = s.settings.dailyLimitPerKey
+  const proxyUrl = s.settings.proxyUrl
 
   // bounded by the number of keys (each key tried at most once per call)
   for (let attempt = 0; attempt < s.keys.length + 1; attempt++) {
@@ -92,13 +93,22 @@ export async function synthOne(
     }
 
     try {
-      const pcm = await synthesize({ text, voice, model, apiKey, signal })
+      const pcm = await synthesize({ text, voice, model, apiKey, proxyUrl, signal })
       s.mutate((d) => {
         d.quota[picked.key.id].count += 1
       })
       return pcm
     } catch (e) {
       if (e instanceof TtsError) {
+        if (e.geoBlocked) throw e // location issue — rotating keys won't help
+        if (e.forbidden) {
+          // project banned by Google — disable this key for good, try the next
+          s.mutate((d) => {
+            const k = d.keys.find((x) => x.id === picked.key.id)
+            if (k) k.active = false
+          })
+          continue
+        }
         if (e.quotaHit) {
           s.mutate((d) => {
             d.quota[picked.key.id].exhausted = true

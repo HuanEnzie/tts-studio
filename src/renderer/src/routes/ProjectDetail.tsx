@@ -105,7 +105,8 @@ export function ProjectDetail() {
       </div>
 
       {/* settings strip */}
-      <div className="flex flex-wrap items-end gap-4 border-b border-border/60 bg-surface/40 px-7 py-3">
+      <div className="flex flex-col gap-3 border-b border-border/60 bg-surface/40 px-7 py-3">
+        <div className="flex flex-wrap items-end gap-4">
         <div className="w-40">
           <Field label="Giọng mặc định">
             <Select value={p.settings.voice} onChange={(e) => update({ voice: e.target.value })}>
@@ -127,6 +128,10 @@ export function ProjectDetail() {
           </Field>
         </div>
         <Button variant="secondary" icon={<Upload className="h-4 w-4" />} onClick={() => setImporting(true)}>Thêm dòng</Button>
+        </div>
+        <Field label="Yêu cầu giọng (áp cho mọi dòng trong dự án)" hint="Giữ cố định để các dòng đồng nhất giọng. VD: giọng nam miền Bắc, truyền cảm, phù hợp video TVC.">
+          <Input value={p.settings.voiceInstruction} onChange={(e) => update({ voiceInstruction: e.target.value })} placeholder="VD: Giọng nam miền Bắc, trầm ấm, truyền cảm, phù hợp quảng cáo TVC." />
+        </Field>
       </div>
 
       {/* rows */}

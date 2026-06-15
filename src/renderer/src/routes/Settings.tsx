@@ -3,7 +3,7 @@ import { FolderOpen, Plus, Trash2, BookA } from 'lucide-react'
 import { Button } from '../design/Button'
 import { Card } from '../design/Card'
 import { PageHeader } from '../design/PageHeader'
-import { Field, Input, Select } from '../design/Input'
+import { Field, Input, Select, Textarea } from '../design/Input'
 import { ipc } from '../lib/ipc'
 import { toast } from '../store/toast'
 import { buildFilename } from '@shared/filename'
@@ -55,6 +55,17 @@ export function Settings() {
           <div className="w-40"><Field label="Giọng mặc định"><Select value={s.defaultVoice} onChange={(e) => patch({ defaultVoice: e.target.value })}>{VOICES.map((v) => <option key={v} value={v}>{v}</option>)}</Select></Field></div>
           <div className="w-44"><Field label="Giới hạn req/key/ngày" hint="Free tier ~10"><Input type="number" value={s.dailyLimitPerKey} onChange={(e) => patch({ dailyLimitPerKey: Math.max(1, Number(e.target.value) || 1) })} /></Field></div>
         </div>
+        <Field label="Yêu cầu giọng mặc định" hint="Áp cho Tạo nhanh và dùng làm mặc định cho dự án mới. VD: giọng nam miền Bắc, truyền cảm, phù hợp video TVC.">
+          <Textarea value={s.voiceInstruction} onChange={(e) => patch({ voiceInstruction: e.target.value })} className="h-20" placeholder="VD: Giọng nam miền Bắc, trầm ấm, truyền cảm, tốc độ vừa phải, phù hợp quảng cáo TVC." />
+        </Field>
+      </Card>
+
+      <Card className="flex flex-col gap-4 p-5">
+        <h3 className="text-sm font-semibold text-ink">Mạng / Proxy</h3>
+        <p className="-mt-2 text-xs text-ink-faint">Nếu gặp lỗi "User location is not supported", Gemini đang chặn vùng IP của bạn. Đặt proxy HTTP/HTTPS ở vùng được hỗ trợ (vd US) để đi vòng. Để trống nếu không cần.</p>
+        <Field label="Proxy URL">
+          <Input value={s.proxyUrl} onChange={(e) => patch({ proxyUrl: e.target.value })} placeholder="http://user:pass@host:port" />
+        </Field>
       </Card>
 
       <Card className="flex flex-col gap-4 p-5">

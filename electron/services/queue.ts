@@ -5,6 +5,7 @@ import { store } from './store'
 import { synthOne, QuotaExhausted } from './engine'
 import { writeAudio } from './audio'
 import { applyDictionary } from '../core/dictionary'
+import { buildSpokenPrompt } from '../core/prompt'
 import { buildFilename, projectFolderName } from '../core/filename'
 import { pacificDateString } from '../core/pacific'
 import type { Project, Row, ProjectStatus } from '../core/types'
@@ -83,9 +84,13 @@ async function processRow(
   setRow(project.id, row.id, { status: 'running', error: undefined })
   emit(project.id, { row: { ...row, status: 'running' } })
 
-  const text = applyDictionary(row.text, s.dictionary)
-  const styled = row.style ? `${row.style}: ${text}` : text
-  const pcm = await synthOne(styled, row.voice || project.settings.voice, signal)
+  const dictText = applyDictionary(row.text, s.dictionary)
+  const prompt = buildSpokenPrompt({
+    instruction: project.settings.voiceInstruction,
+    style: row.style,
+    text: dictText
+  })
+  const pcm = await synthOne(prompt, row.voice || project.settings.voice, signal)
 
   const dir = outDirFor(project)
   const { date, datetime } = nowStamp()

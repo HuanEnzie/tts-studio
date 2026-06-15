@@ -3,6 +3,7 @@ import { writeFileSync, readFileSync, existsSync, renameSync, mkdirSync } from '
 import { join } from 'path'
 import {
   DEFAULT_SETTINGS,
+  LEGACY_TTS_MODELS,
   type AppSettings,
   type ApiKey,
   type KeyQuota,
@@ -50,11 +51,22 @@ class Store {
     try {
       const parsed = JSON.parse(readFileSync(this.file, 'utf-8')) as Partial<DbShape>
       const base = emptyDb()
-      return {
+      const data: DbShape = {
         ...base,
         ...parsed,
         settings: { ...base.settings, ...(parsed.settings ?? {}) }
       }
+      // migrate a model id that is no longer available to the verified default
+      if (LEGACY_TTS_MODELS.includes(data.settings.model)) {
+        data.settings.model = DEFAULT_SETTINGS.model
+      }
+      // backfill voiceInstruction for projects created before the field existed
+      for (const p of data.projects) {
+        if (p.settings && typeof p.settings.voiceInstruction !== 'string') {
+          p.settings.voiceInstruction = ''
+        }
+      }
+      return data
     } catch {
       // corrupt file — keep a backup, start fresh rather than crashing
       try {
