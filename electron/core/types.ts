@@ -101,7 +101,7 @@ export const VOICES = [
 
 export const DEFAULT_SETTINGS: AppSettings = {
   outputRoot: '',
-  model: 'gemini-2.5-flash-preview-tts',
+  model: 'gemini-3.1-flash-tts-preview',
   defaultVoice: 'Kore',
   defaultStyle: '',
   voiceInstruction: '',
@@ -111,5 +111,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   proxyUrl: ''
 }
 
-/** Model ids superseded by the verified-working default; migrated on load. */
-export const LEGACY_TTS_MODELS = ['gemini-3.1-flash-tts-preview']
+/** TTS models verified callable via generateContent (ListModels omits some). */
+export const TTS_MODELS = [
+  'gemini-3.1-flash-tts-preview',
+  'gemini-2.5-flash-preview-tts',
+  'gemini-2.5-pro-preview-tts'
+] as const
+
+/** Model ids that are truly gone and should be migrated on load (none today). */
+export const LEGACY_TTS_MODELS: string[] = []
