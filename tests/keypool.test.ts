@@ -5,6 +5,7 @@ import {
   freeTotals,
   paidUsed,
   noCapacityReason,
+  selectScheduled,
   type KeyState
 } from '../electron/core/keypool'
 import type { ApiKey } from '../electron/core/types'
@@ -71,6 +72,36 @@ describe('totals', () => {
 
   it('hasCapacity true while a free key has room', () => {
     expect(hasCapacity(states)).toBe(true)
+  })
+})
+
+describe('selectScheduled (RPM throttle)', () => {
+  const interval = 20_000 // 3 RPM -> 20s between calls on a free key
+  const minInterval = () => interval
+
+  it('picks a ready key with no wait', () => {
+    const r = selectScheduled([state('a', 0)], 100_000, () => 0, minInterval)
+    expect(r?.key.key.id).toBe('a')
+    expect(r?.waitMs).toBe(0)
+  })
+
+  it('prefers a cool key over one used recently', () => {
+    const now = 100_000
+    const last = (id: string) => (id === 'a' ? now - 1000 : 0) // a used 1s ago, b idle
+    const r = selectScheduled([state('a', 0), state('b', 0)], now, last, minInterval)
+    expect(r?.key.key.id).toBe('b')
+    expect(r?.waitMs).toBe(0)
+  })
+
+  it('returns the wait time when every key is still cooling down', () => {
+    const now = 100_000
+    const last = () => now - 5000 // used 5s ago, needs 20s -> wait 15s
+    const r = selectScheduled([state('a', 0)], now, last, minInterval)
+    expect(r?.waitMs).toBe(15_000)
+  })
+
+  it('null when nothing usable', () => {
+    expect(selectScheduled([state('a', 10)], 0, () => 0, minInterval)).toBeNull()
   })
 })
 

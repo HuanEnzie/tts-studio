@@ -36,6 +36,34 @@ export function hasCapacity(states: KeyState[]): boolean {
   return states.some(isUsable)
 }
 
+/**
+ * RPM-aware pick. Free keys are preferred (cost), then within the chosen tier
+ * the key that becomes available soonest (respecting its per-key rate limit).
+ * Returns the key plus how long to wait before calling it (0 = ready now).
+ * Pure: caller supplies `now`, last-call lookup, and per-key min interval.
+ */
+export function selectScheduled(
+  states: KeyState[],
+  now: number,
+  lastCallOf: (id: string) => number,
+  minIntervalOf: (key: ApiKey) => number
+): { key: KeyState; waitMs: number } | null {
+  const usable = states.filter(isUsable)
+  if (usable.length === 0) return null
+  const free = usable.filter((s) => s.key.tier === 'free')
+  const group = free.length > 0 ? free : usable.filter((s) => s.key.tier === 'paid')
+
+  const ranked = group
+    .map((s) => ({ s, readyAt: lastCallOf(s.key.id) + minIntervalOf(s.key) }))
+    .sort((a, b) => {
+      if (a.readyAt !== b.readyAt) return a.readyAt - b.readyAt
+      return b.s.key.dailyLimit - b.s.quota.count - (a.s.key.dailyLimit - a.s.quota.count)
+    })
+
+  const top = ranked[0]
+  return { key: top.s, waitMs: Math.max(0, top.readyAt - now) }
+}
+
 /** Free-tier used/total today across active, non-banned free keys. */
 export function freeTotals(states: KeyState[]): { used: number; total: number } {
   let used = 0

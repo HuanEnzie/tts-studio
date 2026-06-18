@@ -17,6 +17,8 @@ export interface ApiKey {
   tier: KeyTier
   /** daily free-tier cap (ignored for paid keys) */
   dailyLimit: number
+  /** per-minute call cap for THIS key (0 = use the global free default; paid keys are not throttled) */
+  rpm?: number
   /** set by the engine on a 403 PERMISSION_DENIED; persists until user clears */
   banned: boolean
   /** the exact error text that caused the ban, shown to the user */
@@ -79,6 +81,8 @@ export interface AppSettings {
   voiceInstruction: string
   filenameTemplate: string
   dailyLimitPerKey: number
+  /** per-minute call cap for free keys (Gemini free tier ~3 RPM) */
+  freeRpm: number
   format: 'mp3' | 'wav'
   /** Optional HTTP/HTTPS proxy (e.g. http://user:pass@host:port) to route
    * Gemini calls through a supported region when the local IP is geo-blocked. */
@@ -125,6 +129,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   voiceInstruction: '',
   filenameTemplate: '{date}_{project}_{index}_{slug}',
   dailyLimitPerKey: 10,
+  freeRpm: 3,
   format: 'mp3',
   proxyUrl: ''
 }

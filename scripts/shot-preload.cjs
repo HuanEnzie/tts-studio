@@ -21,7 +21,7 @@ const quota = { freeUsed: 17, freeTotal: 20, paidUsed: 42, activeKeys: 3, keys: 
   { id: 'k3', label: 'Key trả phí', account: 'pay@gmail.com', active: true, tier: 'paid', banned: false, used: 42, limit: 0, exhausted: false },
   { id: 'k4', label: 'Nick B - Project 1', account: 'b@gmail.com', active: true, tier: 'free', banned: true, used: 0, limit: 10, exhausted: false }
 ] }
-const settings = { outputRoot: 'C:/Users/Acer/Documents/TTS Studio', model: 'gemini-3.1-flash-tts-preview', defaultVoice: 'Kore', defaultStyle: '', voiceInstruction: 'Giọng nam miền Bắc, trầm ấm, truyền cảm, phù hợp video TVC.', filenameTemplate: '{date}_{project}_{index}_{slug}', dailyLimitPerKey: 10, format: 'mp3', proxyUrl: '' }
+const settings = { outputRoot: 'C:/Users/Acer/Documents/TTS Studio', model: 'gemini-3.1-flash-tts-preview', defaultVoice: 'Kore', defaultStyle: '', voiceInstruction: 'Giọng nam miền Bắc, trầm ấm, truyền cảm, phù hợp video TVC.', filenameTemplate: '{date}_{project}_{index}_{slug}', dailyLimitPerKey: 10, freeRpm: 3, format: 'mp3', proxyUrl: '' }
 const dict = [
   { id: 'd1', pattern: 'TP.HCM', replacement: 'Thành phố Hồ Chí Minh', enabled: true },
   { id: 'd2', pattern: 'iPhone', replacement: 'ai phôn', enabled: true }

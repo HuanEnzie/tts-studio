@@ -3,14 +3,38 @@ import { decrypt } from './crypto'
 import { synthesize, TtsError } from './gemini'
 import { pacificDateString } from '../core/pacific'
 import {
-  selectKey,
   hasCapacity,
   freeTotals,
   paidUsed,
   noCapacityReason,
+  selectScheduled,
   type KeyState
 } from '../core/keypool'
-import type { KeyQuota, QuotaSummary } from '../core/types'
+import type { ApiKey, KeyQuota, QuotaSummary } from '../core/types'
+
+// per-key last-dispatch time (epoch ms) for RPM throttling, in-memory per session
+const lastCallAt = new Map<string, number>()
+
+function minIntervalMs(key: ApiKey, freeRpm: number): number {
+  if (key.tier === 'paid') return 0
+  const rpm = key.rpm && key.rpm > 0 ? key.rpm : Math.max(1, freeRpm)
+  return Math.ceil(60_000 / rpm)
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new Error('aborted'))
+    const t = setTimeout(resolve, ms)
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(t)
+        reject(new Error('aborted'))
+      },
+      { once: true }
+    )
+  })
+}
 
 /** Free quota used up for today — batch can resume after the Pacific reset. */
 export class QuotaExhausted extends Error {
@@ -121,11 +145,20 @@ export async function synthOne(
   const s = store()
   const model = s.settings.model
   const proxyUrl = s.settings.proxyUrl
+  const freeRpm = s.settings.freeRpm
 
   for (let attempt = 0; attempt < s.keys.length + 1; attempt++) {
     ensureFresh()
-    const picked = selectKey(states())
-    if (!picked) throw capacityError()
+    const sched = selectScheduled(
+      states(),
+      Date.now(),
+      (id) => lastCallAt.get(id) ?? 0,
+      (key) => minIntervalMs(key, freeRpm)
+    )
+    if (!sched) throw capacityError()
+    if (sched.waitMs > 0) await sleep(sched.waitMs, signal) // respect per-key RPM
+    const picked = sched.key
+    lastCallAt.set(picked.key.id, Date.now())
 
     let apiKey: string
     try {
