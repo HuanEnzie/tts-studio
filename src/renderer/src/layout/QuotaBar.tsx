@@ -26,21 +26,20 @@ export function QuotaBar() {
     }
   }, [refresh])
 
-  const { used, total } = summary
-  const remaining = Math.max(0, total - used)
-  const pct = total > 0 ? Math.min(100, (used / total) * 100) : 0
+  const { freeUsed, freeTotal, paidUsed, activeKeys } = summary
+  const remaining = Math.max(0, freeTotal - freeUsed)
+  const pct = freeTotal > 0 ? Math.min(100, (freeUsed / freeTotal) * 100) : 0
   const dayPct = (1 - ms / 86_400_000) * 100
-  const keyCount = summary.keys.filter((k) => k.active).length
 
   return (
     <div className="flex items-center gap-5 border-t border-border/60 px-4 py-2.5">
       <div className="flex items-center gap-1.5 text-xs text-ink-muted">
         <KeyRound className="h-3.5 w-3.5 text-ink-faint" />
-        <span className="tnum">{keyCount} key</span>
+        <span className="tnum">{activeKeys} key</span>
       </div>
 
       <div className="flex flex-1 items-center gap-3">
-        <span className="text-xs text-ink-muted">Quota hôm nay</span>
+        <span className="text-xs text-ink-muted">Free hôm nay</span>
         <div className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-surface-hover">
           <div
             className="absolute inset-y-0 left-0 rounded-full bg-accent-gradient transition-[width] duration-500"
@@ -49,8 +48,13 @@ export function QuotaBar() {
         </div>
         <span className="tnum text-xs text-ink">
           <span className="font-semibold">{remaining}</span>
-          <span className="text-ink-faint"> / {total} còn lại</span>
+          <span className="text-ink-faint"> / {freeTotal} còn lại</span>
         </span>
+        {paidUsed > 0 && (
+          <span className="tnum rounded-md bg-accent-soft px-2 py-0.5 text-xs text-accent-to">
+            Paid: {paidUsed}
+          </span>
+        )}
       </div>
 
       <div className="flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1">

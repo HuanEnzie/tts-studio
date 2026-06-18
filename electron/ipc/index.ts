@@ -5,7 +5,7 @@ import { join } from 'path'
 import { store } from '../services/store'
 import { encrypt, decrypt, maskKey } from '../services/crypto'
 import { validateKey, synthesize, TtsError } from '../services/gemini'
-import { quotaSummary, remainingToday, synthOne } from '../services/engine'
+import { quotaSummary, hasUsableKey, synthOne } from '../services/engine'
 import {
   startBatch,
   stopBatch,
@@ -24,7 +24,8 @@ import {
   type Project,
   type Row,
   type ProjectSettings,
-  type DictEntry
+  type DictEntry,
+  type KeyTier
 } from '../core/types'
 
 type RowInput = { text: string; voice?: string; style?: string }
@@ -80,10 +81,13 @@ export function registerIpc(): void {
       label: k.label,
       account: k.account,
       active: k.active,
+      tier: k.tier,
+      dailyLimit: k.dailyLimit,
+      banned: k.banned,
       createdAt: k.createdAt
     }))
   )
-  h('keys:add', (p: { label: string; account: string; key: string }) => {
+  h('keys:add', (p: { label: string; account: string; key: string; tier?: KeyTier }) => {
     const s = store()
     const id = randomUUID()
     s.mutate((d) =>
@@ -93,12 +97,15 @@ export function registerIpc(): void {
         account: p.account || '',
         enc: encrypt(p.key.trim()),
         active: true,
+        tier: p.tier ?? 'free',
+        dailyLimit: s.settings.dailyLimitPerKey,
+        banned: false,
         createdAt: Date.now()
       })
     )
     return id
   })
-  h('keys:addBulk', (p: { text: string }) => {
+  h('keys:addBulk', (p: { text: string; tier?: KeyTier }) => {
     const s = store()
     let added = 0
     const lines = p.text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
@@ -116,6 +123,9 @@ export function registerIpc(): void {
           account,
           enc: encrypt(key),
           active: true,
+          tier: p.tier ?? 'free',
+          dailyLimit: s.settings.dailyLimitPerKey,
+          banned: false,
           createdAt: Date.now()
         })
         added++
@@ -123,7 +133,7 @@ export function registerIpc(): void {
     })
     return added
   })
-  h('keys:update', (p: { id: string; patch: { label?: string; account?: string; active?: boolean } }) => {
+  h('keys:update', (p: { id: string; patch: { label?: string; account?: string; active?: boolean; tier?: KeyTier; dailyLimit?: number; banned?: boolean } }) => {
     store().mutate((d) => {
       const k = d.keys.find((x) => x.id === p.id)
       if (k) Object.assign(k, p.patch)
@@ -143,7 +153,7 @@ export function registerIpc(): void {
 
   // ---- quota ----
   h('quota:summary', () => quotaSummary())
-  h('quota:remaining', () => remainingToday())
+  h('quota:hasCapacity', () => hasUsableKey())
 
   // ---- diagnostics ----
   // One end-to-end check: key auth (ListModels) + a real TTS call to detect

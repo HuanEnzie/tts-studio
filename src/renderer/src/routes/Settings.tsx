@@ -68,7 +68,7 @@ export function Settings() {
         <div className="flex flex-wrap gap-4">
           <div className="min-w-[260px] flex-1"><Field label="Model TTS"><Select value={s.model} onChange={(e) => patch({ model: e.target.value })}>{(TTS_MODELS.includes(s.model as never) ? TTS_MODELS : [s.model, ...TTS_MODELS]).map((m) => <option key={m} value={m}>{m}</option>)}</Select></Field></div>
           <div className="w-40"><Field label="Giọng mặc định"><Select value={s.defaultVoice} onChange={(e) => patch({ defaultVoice: e.target.value })}>{VOICES.map((v) => <option key={v} value={v}>{v}</option>)}</Select></Field></div>
-          <div className="w-44"><Field label="Giới hạn req/key/ngày" hint="Free tier ~10"><Input type="number" value={s.dailyLimitPerKey} onChange={(e) => patch({ dailyLimitPerKey: Math.max(1, Number(e.target.value) || 1) })} /></Field></div>
+          <div className="w-48"><Field label="Giới hạn Free mặc định/key" hint="Cho key Free mới (free tier ~10). Sửa riêng từng key ở mục API Keys."><Input type="number" value={s.dailyLimitPerKey} onChange={(e) => patch({ dailyLimitPerKey: Math.max(1, Number(e.target.value) || 1) })} /></Field></div>
         </div>
         <Field label="Yêu cầu giọng mặc định" hint="Áp cho Tạo nhanh và dùng làm mặc định cho dự án mới. VD: giọng nam miền Bắc, truyền cảm, phù hợp video TVC.">
           <Textarea value={s.voiceInstruction} onChange={(e) => patch({ voiceInstruction: e.target.value })} className="h-20" placeholder="VD: Giọng nam miền Bắc, trầm ấm, truyền cảm, tốc độ vừa phải, phù hợp quảng cáo TVC." />

@@ -8,7 +8,7 @@ interface QuotaState {
 }
 
 export const useQuota = create<QuotaState>((set) => ({
-  summary: { used: 0, total: 0, keys: [] },
+  summary: { freeUsed: 0, freeTotal: 0, paidUsed: 0, activeKeys: 0, keys: [] },
   refresh: async () => {
     try {
       const summary = await ipc.quota.summary()

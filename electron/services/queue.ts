@@ -2,7 +2,7 @@ import { EventEmitter } from 'events'
 import { mkdirSync } from 'fs'
 import { join } from 'path'
 import { store } from './store'
-import { synthOne, QuotaExhausted } from './engine'
+import { synthOne, QuotaExhausted, KeysUnavailable } from './engine'
 import { writeAudio } from './audio'
 import { applyDictionary } from '../core/dictionary'
 import { buildSpokenPrompt } from '../core/prompt'
@@ -133,6 +133,11 @@ export async function startBatch(projectId: string): Promise<void> {
         if (e instanceof QuotaExhausted) {
           // leave the row pending; resume tomorrow after reset
           emit(projectId, { quotaExhausted: true })
+          break
+        }
+        if (e instanceof KeysUnavailable) {
+          // no active/usable key — waiting won't help; stop and report
+          emit(projectId, { blocked: (e as Error).message })
           break
         }
         if (abort.signal.aborted) break

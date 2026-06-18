@@ -2,13 +2,29 @@ import { store } from './store'
 import { decrypt } from './crypto'
 import { synthesize, TtsError } from './gemini'
 import { pacificDateString } from '../core/pacific'
-import { selectKey, totalRemaining, totalUsed, type KeyState } from '../core/keypool'
+import {
+  selectKey,
+  hasCapacity,
+  freeTotals,
+  paidUsed,
+  noCapacityReason,
+  type KeyState
+} from '../core/keypool'
 import type { KeyQuota, QuotaSummary } from '../core/types'
 
+/** Free quota used up for today — batch can resume after the Pacific reset. */
 export class QuotaExhausted extends Error {
   constructor() {
-    super('Đã hết quota trên tất cả key cho hôm nay')
+    super('Đã hết lượt free trên các key hôm nay (chưa có key Paid còn dùng được).')
     this.name = 'QuotaExhausted'
+  }
+}
+
+/** No usable key for a reason waiting won't fix (none active / all banned). */
+export class KeysUnavailable extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'KeysUnavailable'
   }
 }
 
@@ -28,41 +44,61 @@ function ensureFresh(): void {
 
 function states(): KeyState[] {
   const s = store()
-  return s.keys.map((key) => ({
-    key,
-    quota: s.quota[key.id] as KeyQuota
-  }))
+  return s.keys.map((key) => ({ key, quota: s.quota[key.id] as KeyQuota }))
 }
 
 export function quotaSummary(): QuotaSummary {
   ensureFresh()
   const s = store()
-  const limit = s.settings.dailyLimitPerKey
   const st = states()
+  const ft = freeTotals(st)
   return {
-    used: totalUsed(st, limit),
-    total: s.keys.filter((k) => k.active).length * limit,
+    freeUsed: ft.used,
+    freeTotal: ft.total,
+    paidUsed: paidUsed(st),
+    activeKeys: s.keys.filter((k) => k.active && !k.banned).length,
     keys: st.map((x) => ({
       id: x.key.id,
       label: x.key.label,
       account: x.key.account,
       active: x.key.active,
-      used: x.quota.exhausted ? limit : Math.min(limit, x.quota.count),
-      limit,
+      tier: x.key.tier,
+      banned: x.key.banned,
+      used:
+        x.key.tier === 'paid'
+          ? x.quota.count
+          : x.quota.exhausted
+            ? x.key.dailyLimit
+            : Math.min(x.key.dailyLimit, x.quota.count),
+      limit: x.key.tier === 'paid' ? 0 : x.key.dailyLimit,
       exhausted: x.quota.exhausted
     }))
   }
 }
 
-export function remainingToday(): number {
+export function hasUsableKey(): boolean {
   ensureFresh()
-  return totalRemaining(states(), store().settings.dailyLimitPerKey)
+  return hasCapacity(states())
+}
+
+function banKey(id: string): void {
+  store().mutate((d) => {
+    const k = d.keys.find((x) => x.id === id)
+    if (k) k.banned = true
+  })
+}
+
+function capacityError(): Error {
+  const reason = noCapacityReason(states())
+  if (reason === 'no-active') return new KeysUnavailable('Chưa có API key nào đang bật.')
+  if (reason === 'all-banned')
+    return new KeysUnavailable('Tất cả key đang bật đều bị cấm (403). Bỏ cấm hoặc thêm key khác.')
+  return new QuotaExhausted()
 }
 
 /**
- * Synthesize one chunk, rotating across keys. On a 429/quota error the key is
- * marked exhausted for the day and the next key is tried. Throws
- * QuotaExhausted when no key has room left.
+ * Synthesize one chunk, rotating across keys (free first, then paid). 429 marks
+ * the key exhausted for the day; 403 bans it (engine never touches `active`).
  */
 export async function synthOne(
   text: string,
@@ -71,24 +107,18 @@ export async function synthOne(
 ): Promise<Buffer> {
   const s = store()
   const model = s.settings.model
-  const limit = s.settings.dailyLimitPerKey
   const proxyUrl = s.settings.proxyUrl
 
-  // bounded by the number of keys (each key tried at most once per call)
   for (let attempt = 0; attempt < s.keys.length + 1; attempt++) {
     ensureFresh()
-    const picked = selectKey(states(), limit)
-    if (!picked) throw new QuotaExhausted()
+    const picked = selectKey(states())
+    if (!picked) throw capacityError()
 
     let apiKey: string
     try {
       apiKey = decrypt(picked.key.enc)
     } catch {
-      // unreadable key — disable it and move on
-      s.mutate((d) => {
-        const k = d.keys.find((x) => x.id === picked.key.id)
-        if (k) k.active = false
-      })
+      banKey(picked.key.id) // undecryptable here — skip and surface it
       continue
     }
 
@@ -102,23 +132,19 @@ export async function synthOne(
       if (e instanceof TtsError) {
         if (e.geoBlocked) throw e // location issue — rotating keys won't help
         if (e.forbidden) {
-          // project banned by Google — disable this key for good, try the next
-          s.mutate((d) => {
-            const k = d.keys.find((x) => x.id === picked.key.id)
-            if (k) k.active = false
-          })
+          banKey(picked.key.id)
           continue
         }
         if (e.quotaHit) {
           s.mutate((d) => {
             d.quota[picked.key.id].exhausted = true
           })
-          continue // try next key
+          continue
         }
         if (e.retriable && attempt < 2) continue
       }
       throw e
     }
   }
-  throw new QuotaExhausted()
+  throw capacityError()
 }

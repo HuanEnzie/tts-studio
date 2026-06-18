@@ -3,6 +3,7 @@
 
 export type RowStatus = 'pending' | 'running' | 'done' | 'error'
 export type ProjectStatus = 'draft' | 'running' | 'done' | 'partial' | 'error'
+export type KeyTier = 'free' | 'paid'
 
 export interface ApiKey {
   id: string
@@ -10,7 +11,14 @@ export interface ApiKey {
   account: string
   /** base64 of safeStorage-encrypted key material (never the raw key) */
   enc: string
+  /** user toggle ONLY — the engine never flips this */
   active: boolean
+  /** 'free' = capped at dailyLimit/day; 'paid' = no daily cap, usage = cost */
+  tier: KeyTier
+  /** daily free-tier cap (ignored for paid keys) */
+  dailyLimit: number
+  /** set by the engine on a 403 PERMISSION_DENIED; persists until user clears */
+  banned: boolean
   createdAt: number
 }
 
@@ -80,14 +88,22 @@ export interface KeyView {
   label: string
   account: string
   active: boolean
+  tier: KeyTier
+  banned: boolean
   used: number
-  limit: number
+  limit: number // free: daily cap; paid: 0 (unlimited)
   exhausted: boolean
 }
 
 export interface QuotaSummary {
-  used: number
-  total: number
+  /** free-tier generations used today across active, non-banned free keys */
+  freeUsed: number
+  /** total free-tier capacity today (sum of free keys' daily limits) */
+  freeTotal: number
+  /** generations on paid keys today (counted as cost, never capped) */
+  paidUsed: number
+  /** active, non-banned keys */
+  activeKeys: number
   keys: KeyView[]
 }
 

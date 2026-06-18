@@ -1,15 +1,15 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { KeyRound, Plus, ShieldCheck, Trash2, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
+import { KeyRound, Plus, ShieldCheck, Trash2, CheckCircle2, Loader2, Ban } from 'lucide-react'
 import { Button } from '../design/Button'
 import { PageHeader } from '../design/PageHeader'
 import { EmptyState } from '../design/EmptyState'
 import { Modal } from '../design/Modal'
-import { Field, Input, Textarea } from '../design/Input'
+import { Field, Input, Textarea, Select } from '../design/Input'
 import { ipc, type KeyMeta } from '../lib/ipc'
 import { useQuota } from '../store/quota'
 import { toast } from '../store/toast'
-import type { KeyView } from '@shared/types'
+import type { KeyView, KeyTier } from '@shared/types'
 
 export function Keys() {
   const [keys, setKeys] = useState<KeyMeta[]>([])
@@ -26,6 +26,11 @@ export function Keys() {
 
   const usageOf = (id: string): KeyView | undefined => summary.keys.find((k) => k.id === id)
 
+  const update = async (id: string, patch: Parameters<typeof ipc.keys.update>[1]) => {
+    await ipc.keys.update(id, patch)
+    refresh()
+  }
+
   const validate = async (id: string) => {
     setValidating(id)
     const ok = await ipc.keys.validate(id)
@@ -36,7 +41,7 @@ export function Keys() {
   return (
     <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-7">
       <PageHeader title="API Keys"
-        subtitle="Pool key Gemini — lưu mã hóa tại máy, tự xoay vòng khi gặp giới hạn."
+        subtitle="Pool key Gemini — lưu mã hóa tại máy, tự xoay vòng. Đặt tier Free/Paid cho từng key."
         action={<Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setAdding(true)}>Thêm key</Button>} />
 
       {keys.length === 0 ? (
@@ -51,30 +56,73 @@ export function Keys() {
           {keys.map((k, i) => {
             const u = usageOf(k.id)
             const used = u?.used ?? 0
-            const limit = u?.limit ?? 10
-            const pct = limit ? (used / limit) * 100 : 0
+            const isPaid = k.tier === 'paid'
+            const pct = !isPaid && k.dailyLimit ? Math.min(100, (used / k.dailyLimit) * 100) : 0
             return (
               <motion.div key={k.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}
-                className="flex items-center gap-4 rounded-xl border border-border bg-surface px-4 py-3">
-                <div className={'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ' + (k.active ? 'bg-accent-soft' : 'bg-surface-hover')}>
-                  <KeyRound className={'h-4 w-4 ' + (k.active ? 'text-accent-to' : 'text-ink-faint')} />
+                className={'flex items-center gap-3 rounded-xl border bg-surface px-4 py-3 ' + (k.banned ? 'border-status-error/40' : 'border-border')}>
+                <div className={'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ' + (k.active && !k.banned ? 'bg-accent-soft' : 'bg-surface-hover')}>
+                  <KeyRound className={'h-4 w-4 ' + (k.active && !k.banned ? 'text-accent-to' : 'text-ink-faint')} />
                 </div>
+
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-ink">{k.label}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="truncate text-sm font-medium text-ink">{k.label}</p>
+                    {k.banned && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-status-error/10 px-2 py-0.5 text-[11px] font-medium text-status-error">
+                        <Ban className="h-3 w-3" /> Bị cấm
+                      </span>
+                    )}
+                  </div>
                   {k.account && <p className="truncate text-xs text-ink-faint">{k.account}</p>}
                 </div>
-                <div className="w-40">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-ink-muted">Hôm nay</span>
-                    <span className={'tnum ' + (u?.exhausted ? 'text-status-error' : 'text-ink-muted')}>{used}/{limit}</span>
-                  </div>
-                  <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-hover">
-                    <div className={'h-full rounded-full ' + (u?.exhausted ? 'bg-status-error' : 'bg-accent-gradient')} style={{ width: `${pct}%` }} />
-                  </div>
+
+                {/* tier */}
+                <select
+                  value={k.tier}
+                  onChange={(e) => update(k.id, { tier: e.target.value as KeyTier })}
+                  className="h-8 rounded-lg border border-border bg-surface px-2 text-xs text-ink outline-none"
+                >
+                  <option value="free">Free</option>
+                  <option value="paid">Paid</option>
+                </select>
+
+                {/* usage */}
+                <div className="w-44">
+                  {isPaid ? (
+                    <div className="text-xs text-ink-muted">
+                      <span className="tnum text-ink">{used}</span> lượt hôm nay <span className="text-ink-faint">(tính phí)</span>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-ink-muted">Hôm nay</span>
+                        <span className={'tnum ' + (u?.exhausted ? 'text-status-error' : 'text-ink-muted')}>
+                          {used}/
+                          <input
+                            type="number"
+                            value={k.dailyLimit}
+                            onChange={(e) => update(k.id, { dailyLimit: Math.max(1, Number(e.target.value) || 1) })}
+                            className="tnum w-12 bg-transparent text-ink outline-none focus:underline"
+                          />
+                        </span>
+                      </div>
+                      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-hover">
+                        <div className={'h-full rounded-full ' + (u?.exhausted ? 'bg-status-error' : 'bg-accent-gradient')} style={{ width: `${pct}%` }} />
+                      </div>
+                    </>
+                  )}
                 </div>
+
+                {k.banned && (
+                  <button onClick={() => update(k.id, { banned: false })} title="Bỏ cấm" className="rounded-lg px-2 py-1 text-xs text-status-warn transition hover:bg-surface-hover">
+                    Bỏ cấm
+                  </button>
+                )}
+
                 <label className="flex cursor-pointer items-center gap-2 text-xs text-ink-muted">
                   <input type="checkbox" checked={k.active} className="h-4 w-4 accent-[#7C5CFF]"
-                    onChange={async (e) => { await ipc.keys.update(k.id, { active: e.target.checked }); refresh() }} />
+                    onChange={(e) => update(k.id, { active: e.target.checked })} />
                   Bật
                 </label>
                 <button onClick={() => validate(k.id)} title="Kiểm tra key" className="rounded-lg p-1.5 text-ink-muted transition hover:bg-surface-hover hover:text-ink">
@@ -100,15 +148,16 @@ function AddKeyModal({ open, onClose, onDone }: { open: boolean; onClose: () => 
   const [account, setAccount] = useState('')
   const [key, setKey] = useState('')
   const [bulk, setBulk] = useState('')
-  useEffect(() => { if (open) { setTab('single'); setLabel(''); setAccount(''); setKey(''); setBulk('') } }, [open])
+  const [tier, setTier] = useState<KeyTier>('free')
+  useEffect(() => { if (open) { setTab('single'); setLabel(''); setAccount(''); setKey(''); setBulk(''); setTier('free') } }, [open])
 
   const submit = async () => {
     if (tab === 'single') {
       if (!key.trim()) { toast.error('Nhập API key'); return }
-      await ipc.keys.add(label, account, key)
+      await ipc.keys.add(label, account, key, tier)
       toast.success('Đã thêm key')
     } else {
-      const n = await ipc.keys.addBulk(bulk)
+      const n = await ipc.keys.addBulk(bulk, tier)
       toast.success(`Đã thêm ${n} key`)
     }
     onDone()
@@ -122,11 +171,17 @@ function AddKeyModal({ open, onClose, onDone }: { open: boolean; onClose: () => 
           <Button size="sm" variant={tab === 'single' ? 'primary' : 'secondary'} onClick={() => setTab('single')}>Một key</Button>
           <Button size="sm" variant={tab === 'bulk' ? 'primary' : 'secondary'} onClick={() => setTab('bulk')}>Nhiều key</Button>
         </div>
+        <Field label="Tier" hint="Free = giới hạn lượt/ngày. Paid = không giới hạn, đếm như chi phí.">
+          <Select value={tier} onChange={(e) => setTier(e.target.value as KeyTier)}>
+            <option value="free">Free (có giới hạn ngày)</option>
+            <option value="paid">Paid (không giới hạn)</option>
+          </Select>
+        </Field>
         {tab === 'single' ? (
           <>
             <Field label="Nhãn (tùy chọn)"><Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Nick A - Project 1" /></Field>
             <Field label="Tài khoản (tùy chọn)"><Input value={account} onChange={(e) => setAccount(e.target.value)} placeholder="email@gmail.com" /></Field>
-            <Field label="API key"><Input value={key} onChange={(e) => setKey(e.target.value)} placeholder="AIza..." /></Field>
+            <Field label="API key"><Input value={key} onChange={(e) => setKey(e.target.value)} placeholder="AIza... hoặc AQ...." /></Field>
           </>
         ) : (
           <Field label="Mỗi dòng một key" hint='Định dạng: "key" hoặc "nhãn,key" hoặc "nhãn,tài khoản,key"'>

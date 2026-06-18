@@ -10,14 +10,16 @@ const projects = [
   { id: 'p4', name: 'Test giọng đọc sách', status: 'draft', settings: { voice: 'Charon', style: '', format: 'mp3', filenameTemplate: '{date}_{project}_{index}_{slug}' }, createdAt: now, updatedAt: now - 259200000, rows: Array.from({ length: 8 }, (_, i) => ({ id: 't' + i, idx: i, text: 'Chương một', voice: 'Charon', style: '', status: 'pending', updatedAt: now })) }
 ]
 const keys = [
-  { id: 'k1', label: 'Nick A - Project 1', account: 'a@gmail.com', active: true, createdAt: now },
-  { id: 'k2', label: 'Nick A - Project 2', account: 'a@gmail.com', active: true, createdAt: now },
-  { id: 'k3', label: 'Nick B - Project 1', account: 'b@gmail.com', active: true, createdAt: now }
+  { id: 'k1', label: 'Nick A - Project 1', account: 'a@gmail.com', active: true, tier: 'free', dailyLimit: 10, banned: false, createdAt: now },
+  { id: 'k2', label: 'Nick A - Project 2', account: 'a@gmail.com', active: true, tier: 'free', dailyLimit: 10, banned: false, createdAt: now },
+  { id: 'k3', label: 'Key trả phí', account: 'pay@gmail.com', active: true, tier: 'paid', dailyLimit: 10, banned: false, createdAt: now },
+  { id: 'k4', label: 'Nick B - Project 1', account: 'b@gmail.com', active: true, tier: 'free', dailyLimit: 10, banned: true, createdAt: now }
 ]
-const quota = { used: 23, total: 30, keys: [
-  { id: 'k1', label: 'Nick A - Project 1', account: 'a@gmail.com', active: true, used: 10, limit: 10, exhausted: true },
-  { id: 'k2', label: 'Nick A - Project 2', account: 'a@gmail.com', active: true, used: 7, limit: 10, exhausted: false },
-  { id: 'k3', label: 'Nick B - Project 1', account: 'b@gmail.com', active: true, used: 6, limit: 10, exhausted: false }
+const quota = { freeUsed: 17, freeTotal: 20, paidUsed: 42, activeKeys: 3, keys: [
+  { id: 'k1', label: 'Nick A - Project 1', account: 'a@gmail.com', active: true, tier: 'free', banned: false, used: 10, limit: 10, exhausted: true },
+  { id: 'k2', label: 'Nick A - Project 2', account: 'a@gmail.com', active: true, tier: 'free', banned: false, used: 7, limit: 10, exhausted: false },
+  { id: 'k3', label: 'Key trả phí', account: 'pay@gmail.com', active: true, tier: 'paid', banned: false, used: 42, limit: 0, exhausted: false },
+  { id: 'k4', label: 'Nick B - Project 1', account: 'b@gmail.com', active: true, tier: 'free', banned: true, used: 0, limit: 10, exhausted: false }
 ] }
 const settings = { outputRoot: 'C:/Users/Acer/Documents/TTS Studio', model: 'gemini-3.1-flash-tts-preview', defaultVoice: 'Kore', defaultStyle: '', voiceInstruction: 'Giọng nam miền Bắc, trầm ấm, truyền cảm, phù hợp video TVC.', filenameTemplate: '{date}_{project}_{index}_{slug}', dailyLimitPerKey: 10, format: 'mp3', proxyUrl: '' }
 const dict = [
@@ -30,7 +32,7 @@ const responses = {
   'dict:list': dict,
   'keys:list': keys,
   'quota:summary': quota,
-  'quota:remaining': 13,
+  'quota:hasCapacity': true,
   'projects:list': projects,
   'projects:get': projects[0]
 }

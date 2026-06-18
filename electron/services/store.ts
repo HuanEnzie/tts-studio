@@ -66,6 +66,12 @@ class Store {
           p.settings.voiceInstruction = ''
         }
       }
+      // backfill per-key tier/limit/banned for keys created before these existed
+      for (const k of data.keys) {
+        if (k.tier !== 'free' && k.tier !== 'paid') k.tier = 'free'
+        if (typeof k.dailyLimit !== 'number') k.dailyLimit = data.settings.dailyLimitPerKey
+        if (typeof k.banned !== 'boolean') k.banned = false
+      }
       return data
     } catch {
       // corrupt file — keep a backup, start fresh rather than crashing

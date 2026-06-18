@@ -36,7 +36,8 @@ export default function App() {
   useEffect(() => {
     const off = ipc.batch.onUpdate((u) => {
       applyBatchUpdate(u)
-      if (u.quotaExhausted) toast.info('Đã hết quota hôm nay — sẽ tiếp tục sau khi reset')
+      if (u.quotaExhausted) toast.info('Đã hết lượt free hôm nay — sẽ tiếp tục sau khi reset (hoặc thêm key Paid)')
+      if (u.blocked) toast.error(u.blocked)
       if (u.finished && u.status === 'done') toast.success('Đã tạo xong tất cả!')
       refreshQuota()
     })

@@ -4,7 +4,8 @@ import type {
   Row,
   ProjectSettings,
   DictEntry,
-  QuotaSummary
+  QuotaSummary,
+  KeyTier
 } from '@shared/types'
 
 const inv = <T = unknown>(c: string, p?: unknown) => window.api.invoke<T>(c, p)
@@ -14,6 +15,9 @@ export interface KeyMeta {
   label: string
   account: string
   active: boolean
+  tier: KeyTier
+  dailyLimit: number
+  banned: boolean
   createdAt: number
 }
 
@@ -23,6 +27,7 @@ export interface BatchUpdate {
   status?: Project['status']
   finished?: boolean
   quotaExhausted?: boolean
+  blocked?: string
 }
 
 type RowInput = { text: string; voice?: string; style?: string }
@@ -34,17 +39,19 @@ export const ipc = {
   },
   keys: {
     list: () => inv<KeyMeta[]>('keys:list'),
-    add: (label: string, account: string, key: string) =>
-      inv<string>('keys:add', { label, account, key }),
-    addBulk: (text: string) => inv<number>('keys:addBulk', { text }),
-    update: (id: string, patch: Partial<Pick<KeyMeta, 'label' | 'account' | 'active'>>) =>
-      inv('keys:update', { id, patch }),
+    add: (label: string, account: string, key: string, tier: KeyTier) =>
+      inv<string>('keys:add', { label, account, key, tier }),
+    addBulk: (text: string, tier: KeyTier) => inv<number>('keys:addBulk', { text, tier }),
+    update: (
+      id: string,
+      patch: Partial<Pick<KeyMeta, 'label' | 'account' | 'active' | 'tier' | 'dailyLimit' | 'banned'>>
+    ) => inv('keys:update', { id, patch }),
     remove: (id: string) => inv('keys:remove', { id }),
     validate: (id: string) => inv<boolean>('keys:validate', { id })
   },
   quota: {
     summary: () => inv<QuotaSummary>('quota:summary'),
-    remaining: () => inv<number>('quota:remaining')
+    hasCapacity: () => inv<boolean>('quota:hasCapacity')
   },
   diag: {
     test: () =>
