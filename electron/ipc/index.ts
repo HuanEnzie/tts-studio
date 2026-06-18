@@ -84,6 +84,7 @@ export function registerIpc(): void {
       tier: k.tier,
       dailyLimit: k.dailyLimit,
       banned: k.banned,
+      bannedReason: k.bannedReason,
       createdAt: k.createdAt
     }))
   )
@@ -136,7 +137,10 @@ export function registerIpc(): void {
   h('keys:update', (p: { id: string; patch: { label?: string; account?: string; active?: boolean; tier?: KeyTier; dailyLimit?: number; banned?: boolean } }) => {
     store().mutate((d) => {
       const k = d.keys.find((x) => x.id === p.id)
-      if (k) Object.assign(k, p.patch)
+      if (k) {
+        Object.assign(k, p.patch)
+        if (p.patch.banned === false) k.bannedReason = undefined // clear on un-ban
+      }
     })
   })
   h('keys:remove', (p: { id: string }) => {
@@ -387,12 +391,15 @@ export function registerIpc(): void {
   })
   h('sys:openPath', (p: { path: string }) => shell.openPath(p.path))
   h('sys:showItem', (p: { path: string }) => shell.showItemInFolder(p.path))
-  h('sys:openProjectFolder', (p: { id: string }) => {
+  h('sys:openProjectFolder', async (p: { id: string }) => {
     const s = store()
     const pr = s.projects.find((x) => x.id === p.id)
     if (!pr) return
     const date = pacificDateString(new Date())
     const dir = pr.outputDir || join(s.settings.outputRoot, projectFolderName(date, pr.name))
-    shell.openPath(dir)
+    const { mkdir } = await import('fs/promises')
+    // the folder only exists after generating; create it so opening never fails
+    await mkdir(dir, { recursive: true }).catch(() => {})
+    return shell.openPath(dir)
   })
 }

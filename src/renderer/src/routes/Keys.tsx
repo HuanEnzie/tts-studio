@@ -74,7 +74,11 @@ export function Keys() {
                       </span>
                     )}
                   </div>
-                  {k.account && <p className="truncate text-xs text-ink-faint">{k.account}</p>}
+                  {k.banned && k.bannedReason ? (
+                    <p className="truncate text-xs text-status-error" title={k.bannedReason}>{k.bannedReason}</p>
+                  ) : (
+                    k.account && <p className="truncate text-xs text-ink-faint">{k.account}</p>
+                  )}
                 </div>
 
                 {/* tier */}

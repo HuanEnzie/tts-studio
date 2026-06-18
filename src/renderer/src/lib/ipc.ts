@@ -18,6 +18,7 @@ export interface KeyMeta {
   tier: KeyTier
   dailyLimit: number
   banned: boolean
+  bannedReason?: string
   createdAt: number
 }
 

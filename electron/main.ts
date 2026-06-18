@@ -49,7 +49,47 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
+// Dev-only end-to-end check: run the REAL engine (store -> key select -> Gemini
+// -> MP3) with a key from env, against an isolated TTS_DATA_DIR. Guarded by env.
+async function runSelfTest(): Promise<void> {
+  const { writeFileSync, statSync } = await import('fs')
+  try {
+    const { store } = await import('./services/store')
+    const { encrypt } = await import('./services/crypto')
+    const { synthOne } = await import('./services/engine')
+    const { writeAudio } = await import('./services/audio')
+    store().mutate((d) =>
+      d.keys.push({
+        id: 'selftest',
+        label: 'selftest',
+        account: '',
+        enc: encrypt((process.env['SELFTEST_KEY'] as string).trim()),
+        active: true,
+        tier: 'free',
+        dailyLimit: 10,
+        banned: false,
+        createdAt: 0
+      })
+    )
+    const pcm = await synthOne(
+      'Giọng nam miền Bắc, truyền cảm: Xin chào, đây là bản kiểm tra tạo giọng.',
+      'Charon'
+    )
+    const out = join(process.cwd(), 'shots', 'selftest.mp3')
+    await writeAudio(pcm, out, 'mp3')
+    console.log('SELFTEST OK bytes=' + statSync(out).size)
+    app.exit(0)
+  } catch (e) {
+    console.log('SELFTEST FAIL: ' + (e as Error).message)
+    app.exit(1)
+  }
+}
+
+app.whenReady().then(async () => {
+  if (process.env['SELFTEST_KEY']) {
+    await runSelfTest()
+    return
+  }
   registerIpc()
   createWindow()
   app.on('activate', () => {

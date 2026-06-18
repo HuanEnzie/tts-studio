@@ -19,6 +19,8 @@ export interface ApiKey {
   dailyLimit: number
   /** set by the engine on a 403 PERMISSION_DENIED; persists until user clears */
   banned: boolean
+  /** the exact error text that caused the ban, shown to the user */
+  bannedReason?: string
   createdAt: number
 }
 

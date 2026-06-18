@@ -81,18 +81,31 @@ export function hasUsableKey(): boolean {
   return hasCapacity(states())
 }
 
-function banKey(id: string): void {
+function banKey(id: string, reason: string): void {
   store().mutate((d) => {
     const k = d.keys.find((x) => x.id === id)
-    if (k) k.banned = true
+    if (k) {
+      k.banned = true
+      k.bannedReason = reason
+    }
   })
 }
 
 function capacityError(): Error {
   const reason = noCapacityReason(states())
   if (reason === 'no-active') return new KeysUnavailable('Chưa có API key nào đang bật.')
-  if (reason === 'all-banned')
-    return new KeysUnavailable('Tất cả key đang bật đều bị cấm (403). Bỏ cấm hoặc thêm key khác.')
+  if (reason === 'all-banned') {
+    // surface the real Google error(s) so the user knows WHY, not just "banned"
+    const reasons = Array.from(
+      new Set(
+        store()
+          .keys.filter((k) => k.active && k.banned && k.bannedReason)
+          .map((k) => k.bannedReason as string)
+      )
+    )
+    const detail = reasons.length ? ` Lý do: ${reasons.join(' | ')}` : ''
+    return new KeysUnavailable(`Tất cả key đang bật đều bị Google từ chối (403).${detail}`)
+  }
   return new QuotaExhausted()
 }
 
@@ -118,7 +131,7 @@ export async function synthOne(
     try {
       apiKey = decrypt(picked.key.enc)
     } catch {
-      banKey(picked.key.id) // undecryptable here — skip and surface it
+      banKey(picked.key.id, 'Không giải mã được key trên máy này (key được mã hóa theo từng máy).')
       continue
     }
 
@@ -132,7 +145,7 @@ export async function synthOne(
       if (e instanceof TtsError) {
         if (e.geoBlocked) throw e // location issue — rotating keys won't help
         if (e.forbidden) {
-          banKey(picked.key.id)
+          banKey(picked.key.id, e.message)
           continue
         }
         if (e.quotaHit) {

@@ -40,7 +40,8 @@ class Store {
   private saveTimer: NodeJS.Timeout | null = null
 
   constructor() {
-    const dir = app.getPath('userData')
+    // TTS_DATA_DIR lets tests/harnesses use an isolated store dir
+    const dir = process.env['TTS_DATA_DIR'] || app.getPath('userData')
     mkdirSync(dir, { recursive: true })
     this.file = join(dir, 'data.json')
     this.data = this.load()
