@@ -160,45 +160,66 @@ export function registerIpc(): void {
   h('quota:hasCapacity', () => hasUsableKey())
 
   // ---- diagnostics ----
-  // One end-to-end check: key auth (ListModels) + a real TTS call to detect
-  // geo-block / ban / quota. Uses the current proxy + model settings.
+  // Full-chain check so we can pinpoint WHERE generation fails:
+  // 1) key present  2) auth  3) Gemini TTS call  4) MP3 write (ffmpeg).
   h('diag:test', async () => {
     const s = store()
-    const active = s.keys.filter((k) => k.active)
+    const active = s.keys.filter((k) => k.active && !k.banned)
     if (active.length === 0) {
-      return { ok: false, kind: 'no-key', message: 'Chưa có API key nào đang bật.' }
+      return { ok: false, stage: 'Key', message: 'Chưa có key đang bật (hoặc tất cả đang bị cấm).' }
     }
-    const key = decrypt(active[0].enc)
+
+    let key: string
+    try {
+      key = decrypt(active[0].enc)
+    } catch {
+      return { ok: false, stage: 'Key', message: 'Không giải mã được key trên máy này — hãy xóa và nhập lại key.' }
+    }
+
+    // 2) auth
     const authed = await validateKey(key, s.settings.proxyUrl)
     if (!authed) {
-      return { ok: false, kind: 'auth', message: 'Key đầu tiên không xác thực được (sai key hoặc bị chặn auth).' }
+      return { ok: false, stage: 'Xác thực', message: 'Key không xác thực được (sai key hoặc mạng chặn).' }
     }
+
+    // 3) Gemini TTS call
+    let pcm: Buffer
     try {
-      await synthesize({
+      pcm = await synthesize({
         text: 'Xin chào',
         voice: s.settings.defaultVoice,
         model: s.settings.model,
         apiKey: key,
         proxyUrl: s.settings.proxyUrl
       })
-      return {
-        ok: true,
-        kind: 'ok',
-        message: `Kết nối OK — tạo TTS được với ${s.settings.model}${s.settings.proxyUrl ? ' (qua proxy)' : ''}.`
-      }
     } catch (e) {
       if (e instanceof TtsError) {
-        if (e.geoBlocked) return { ok: false, kind: 'geo', message: e.message }
-        if (e.forbidden) return { ok: false, kind: 'forbidden', message: e.message }
+        if (e.geoBlocked) return { ok: false, stage: 'Gemini (vùng)', message: e.message }
+        if (e.forbidden) return { ok: false, stage: 'Gemini (403)', message: e.message }
         if (e.quotaHit)
-          return {
-            ok: true,
-            kind: 'quota',
-            message: 'Key OK, không bị chặn vùng — nhưng key này đã hết quota hôm nay.'
-          }
-        return { ok: false, kind: 'error', message: e.message }
+          return { ok: false, stage: 'Gemini (quota)', message: 'Key đã hết lượt hôm nay. Thêm key khác hoặc dùng key Paid.' }
       }
-      return { ok: false, kind: 'error', message: (e as Error).message }
+      return { ok: false, stage: 'Gemini', message: `Model "${s.settings.model}": ${(e as Error).message}` }
+    }
+
+    // 4) MP3 write via bundled ffmpeg (the step that breaks in a packaged app
+    //    if ffmpeg isn't unpacked correctly)
+    try {
+      const { tmpdir } = await import('os')
+      const { statSync, rmSync } = await import('fs')
+      const tmp = join(tmpdir(), `ttscheck-${randomUUID()}.mp3`)
+      await writeAudio(pcm, tmp, 'mp3')
+      const size = statSync(tmp).size
+      rmSync(tmp, { force: true })
+      if (size < 200) return { ok: false, stage: 'Xuất MP3', message: 'Tạo ra file MP3 rỗng (ffmpeg lỗi).' }
+    } catch (e) {
+      return { ok: false, stage: 'Xuất MP3 (ffmpeg)', message: (e as Error).message }
+    }
+
+    return {
+      ok: true,
+      stage: 'OK',
+      message: `Toàn bộ OK: Key → Gemini (${s.settings.model}) → MP3. Tạo được bình thường!`
     }
   })
 

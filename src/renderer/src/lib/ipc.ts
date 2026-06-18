@@ -56,7 +56,7 @@ export const ipc = {
   },
   diag: {
     test: () =>
-      inv<{ ok: boolean; kind: string; message: string }>('diag:test')
+      inv<{ ok: boolean; stage: string; message: string }>('diag:test')
   },
   projects: {
     list: () => inv<Project[]>('projects:list'),

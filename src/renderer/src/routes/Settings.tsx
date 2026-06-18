@@ -20,7 +20,7 @@ export function Settings() {
     setTestRes(null)
     try {
       const r = await ipc.diag.test()
-      setTestRes({ ok: r.ok, message: r.message })
+      setTestRes({ ok: r.ok, message: r.ok ? r.message : `Fail ở khâu "${r.stage}": ${r.message}` })
     } catch (e) {
       setTestRes({ ok: false, message: (e as Error).message })
     } finally {
@@ -83,18 +83,18 @@ export function Settings() {
           <Input value={s.proxyUrl} onChange={(e) => patch({ proxyUrl: e.target.value })} placeholder="http://user:pass@host:port" />
         </Field>
 
-        <div className="flex items-center gap-3">
+        <div>
           <Button variant="secondary" disabled={testing} icon={testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plug className="h-4 w-4" />} onClick={runTest}>
             {testing ? 'Đang kiểm tra…' : 'Kiểm tra kết nối'}
           </Button>
           {testRes && (
-            <span className={'flex items-center gap-1.5 text-sm ' + (testRes.ok ? 'text-status-done' : 'text-status-error')}>
-              {testRes.ok ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
-              {testRes.message}
-            </span>
+            <div className={'mt-2 flex items-start gap-1.5 rounded-lg border px-3 py-2 text-sm ' + (testRes.ok ? 'border-status-done/30 bg-status-done/10 text-status-done' : 'border-status-error/30 bg-status-error/10 text-status-error')}>
+              {testRes.ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <XCircle className="mt-0.5 h-4 w-4 shrink-0" />}
+              <span className="break-words">{testRes.message}</span>
+            </div>
           )}
         </div>
-        <p className="-mt-1 text-xs text-ink-faint">Gọi thử 1 request TTS để báo: key hợp lệ chưa, có bị chặn vùng (geo) không. Tốn 1 request.</p>
+        <p className="-mt-1 text-xs text-ink-faint">Chạy thử toàn bộ chuỗi: Key → Gemini → xuất MP3 (ffmpeg), và chỉ ra fail ở khâu nào. Tốn 1 request.</p>
       </Card>
 
       <Card className="flex flex-col gap-4 p-5">
