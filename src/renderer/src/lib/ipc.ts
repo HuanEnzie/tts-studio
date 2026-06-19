@@ -5,6 +5,9 @@ import type {
   ProjectSettings,
   DictEntry,
   QuotaSummary,
+  CostSummary,
+  BatchEstimate,
+  VoicePreset,
   KeyTier
 } from '@shared/types'
 
@@ -16,7 +19,6 @@ export interface KeyMeta {
   account: string
   active: boolean
   tier: KeyTier
-  dailyLimit: number
   banned: boolean
   bannedReason?: string
   createdAt: number
@@ -45,7 +47,7 @@ export const ipc = {
     addBulk: (text: string, tier: KeyTier) => inv<number>('keys:addBulk', { text, tier }),
     update: (
       id: string,
-      patch: Partial<Pick<KeyMeta, 'label' | 'account' | 'active' | 'tier' | 'dailyLimit' | 'banned'>>
+      patch: Partial<Pick<KeyMeta, 'label' | 'account' | 'active' | 'tier' | 'banned'>>
     ) => inv('keys:update', { id, patch }),
     remove: (id: string) => inv('keys:remove', { id }),
     validate: (id: string) => inv<boolean>('keys:validate', { id })
@@ -53,6 +55,18 @@ export const ipc = {
   quota: {
     summary: () => inv<QuotaSummary>('quota:summary'),
     hasCapacity: () => inv<boolean>('quota:hasCapacity')
+  },
+  cost: {
+    summary: () => inv<CostSummary>('cost:summary')
+  },
+  presets: {
+    list: () => inv<VoicePreset[]>('presets:list'),
+    add: (name: string, voice: string, context: string, scene: string, style: string) =>
+      inv<VoicePreset>('presets:add', { name, voice, context, scene, style }),
+    update: (id: string, patch: Partial<VoicePreset>) => inv('presets:update', { id, patch }),
+    remove: (id: string) => inv('presets:remove', { id }),
+    apply: (id: string, projectId: string) =>
+      inv<Project | null>('presets:apply', { id, projectId })
   },
   diag: {
     test: () =>
@@ -80,12 +94,14 @@ export const ipc = {
     stop: (id: string) => inv('batch:stop', { id }),
     running: (id: string) => inv<boolean>('batch:running', { id }),
     regenRow: (id: string, rowId: string) => inv('batch:regenRow', { id, rowId }),
+    retryFailed: (id: string) => inv<number>('batch:retryFailed', { id }),
+    estimate: (id: string) => inv<BatchEstimate>('batch:estimate', { id }),
     onUpdate: (cb: (u: BatchUpdate) => void) =>
       window.api.on('batch:update', (u) => cb(u as BatchUpdate))
   },
   quick: {
-    synth: (text: string, voice: string, style: string, instruction: string) =>
-      inv<{ id: string; wavBase64: string }>('quick:synth', { text, voice, style, instruction }),
+    synth: (text: string, voice: string, style: string, instruction: string, scene: string) =>
+      inv<{ id: string; wavBase64: string; costUsd: number }>('quick:synth', { text, voice, style, instruction, scene }),
     save: (id: string, suggested: string, format: 'mp3' | 'wav') =>
       inv<string | null>('quick:save', { id, suggested, format })
   },

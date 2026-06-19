@@ -3,7 +3,27 @@
 
 export type RowStatus = 'pending' | 'running' | 'done' | 'error'
 export type ProjectStatus = 'draft' | 'running' | 'done' | 'partial' | 'error'
-export type KeyTier = 'free' | 'paid'
+export type KeyTier = 'free' | 'tier1' | 'tier2' | 'tier3'
+
+export interface TierLimit {
+  rpm: number
+  rpd: number | null // null = unlimited per day
+  paid: boolean // whether usage on this tier costs money
+}
+
+export const TIER_LIMITS: Record<KeyTier, TierLimit> = {
+  free: { rpm: 3, rpd: 10, paid: false },
+  tier1: { rpm: 10, rpd: 100, paid: true },
+  tier2: { rpm: 1000, rpd: 10000, paid: true },
+  tier3: { rpm: 1000, rpd: null, paid: true }
+}
+
+export const TIER_LABELS: Record<KeyTier, string> = {
+  free: 'Free',
+  tier1: 'Tier 1',
+  tier2: 'Tier 2',
+  tier3: 'Tier 3'
+}
 
 export interface ApiKey {
   id: string
@@ -13,12 +33,8 @@ export interface ApiKey {
   enc: string
   /** user toggle ONLY — the engine never flips this */
   active: boolean
-  /** 'free' = capped at dailyLimit/day; 'paid' = no daily cap, usage = cost */
+  /** rate/cost limits come from TIER_LIMITS[tier] */
   tier: KeyTier
-  /** daily free-tier cap (ignored for paid keys) */
-  dailyLimit: number
-  /** per-minute call cap for THIS key (0 = use the global free default; paid keys are not throttled) */
-  rpm?: number
   /** set by the engine on a 403 PERMISSION_DENIED; persists until user clears */
   banned: boolean
   /** the exact error text that caused the ban, shown to the user */
@@ -41,17 +57,25 @@ export interface Row {
   status: RowStatus
   filePath?: string
   error?: string
+  /** actual token usage / cost recorded after a successful generation */
+  inputTokens?: number
+  outputTokens?: number
+  costUsd?: number
+  cached?: boolean
   updatedAt: number
 }
 
 export interface ProjectSettings {
   voice: string
   style: string
-  /** Free-text delivery brief applied to every row, e.g. "giọng nam miền Bắc,
-   * truyền cảm, phù hợp video TVC". Steers tone/accent/pace of the chosen voice. */
+  /** persona/voice brief, e.g. "giọng nam miền Bắc, truyền cảm" (Context) */
   voiceInstruction: string
+  /** situational setting, e.g. "quảng cáo sôi động, kêu gọi mua ngay" (Scene) */
+  scene: string
   format: 'mp3' | 'wav'
   filenameTemplate: string
+  /** per-project spend cap in USD (0 = no cap) */
+  budgetUsd: number
 }
 
 export interface Project {
@@ -72,20 +96,38 @@ export interface DictEntry {
   enabled: boolean
 }
 
+export interface VoicePreset {
+  id: string
+  name: string
+  voice: string
+  context: string // -> voiceInstruction
+  scene: string
+  style: string
+}
+
 export interface AppSettings {
   outputRoot: string
   model: string
   defaultVoice: string
   defaultStyle: string
-  /** Default delivery brief used by Quick mode and seeded into new projects. */
+  /** Default Context brief used by Quick mode and seeded into new projects. */
   voiceInstruction: string
+  /** Default Scene used by Quick mode and seeded into new projects. */
+  scene: string
   filenameTemplate: string
-  dailyLimitPerKey: number
-  /** per-minute call cap for free keys (Gemini free tier ~3 RPM) */
-  freeRpm: number
   format: 'mp3' | 'wav'
-  /** Optional HTTP/HTTPS proxy (e.g. http://user:pass@host:port) to route
-   * Gemini calls through a supported region when the local IP is geo-blocked. */
+  /** how many rows to generate in parallel */
+  concurrency: number
+  /** global spend cap per Pacific day in USD (0 = no cap) */
+  dailyBudgetUsd: number
+  /** reuse a previously generated clip when text+voice+context+scene+style match */
+  cacheEnabled: boolean
+  /** USD per 1M tokens */
+  priceInputPerM: number
+  priceAudioPerM: number
+  /** abort a single TTS request after this many seconds (prevents hangs) */
+  requestTimeoutSec: number
+  /** Optional HTTP/HTTPS proxy to route around region blocks */
   proxyUrl: string
 }
 
@@ -97,20 +139,33 @@ export interface KeyView {
   tier: KeyTier
   banned: boolean
   used: number
-  limit: number // free: daily cap; paid: 0 (unlimited)
+  limit: number // rpd; 0 = unlimited
+  rpm: number
   exhausted: boolean
 }
 
 export interface QuotaSummary {
   /** free-tier generations used today across active, non-banned free keys */
   freeUsed: number
-  /** total free-tier capacity today (sum of free keys' daily limits) */
   freeTotal: number
-  /** generations on paid keys today (counted as cost, never capped) */
+  /** generations on paid-tier keys today */
   paidUsed: number
-  /** active, non-banned keys */
   activeKeys: number
   keys: KeyView[]
+}
+
+export interface CostSummary {
+  todayUsd: number
+  todayInputTokens: number
+  todayOutputTokens: number
+  dailyBudgetUsd: number
+}
+
+export interface BatchEstimate {
+  requests: number
+  inputTokens: number
+  outputTokens: number
+  costUsd: number
 }
 
 export const VOICES = [
@@ -127,10 +182,15 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultVoice: 'Kore',
   defaultStyle: '',
   voiceInstruction: '',
+  scene: '',
   filenameTemplate: '{date}_{project}_{index}_{slug}',
-  dailyLimitPerKey: 10,
-  freeRpm: 3,
   format: 'mp3',
+  concurrency: 4,
+  dailyBudgetUsd: 0,
+  cacheEnabled: true,
+  priceInputPerM: 0.5,
+  priceAudioPerM: 10,
+  requestTimeoutSec: 120,
   proxyUrl: ''
 }
 

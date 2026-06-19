@@ -19,20 +19,22 @@ export function Quick() {
   const [voice, setVoice] = useState('Kore')
   const [style, setStyle] = useState('')
   const [instruction, setInstruction] = useState('')
+  const [scene, setScene] = useState('')
   const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<{ id: string; src: string } | null>(null)
+  const [result, setResult] = useState<{ id: string; src: string; cost: number } | null>(null)
   const refreshQuota = useQuota((s) => s.refresh)
 
-  // load the saved voice instruction once
+  // load the saved context/scene once
   useEffect(() => {
     ipc.settings.get().then((s) => {
       setInstruction(s.voiceInstruction)
+      setScene(s.scene)
       setVoice(s.defaultVoice)
     })
   }, [])
 
-  // persist the instruction so it is remembered next time
-  const saveInstruction = () => ipc.settings.set({ voiceInstruction: instruction })
+  // persist so they are remembered next time
+  const saveDefaults = () => ipc.settings.set({ voiceInstruction: instruction, scene })
 
   const chars = text.length
   const reqs = Math.max(1, Math.ceil(chars / 1500))
@@ -42,8 +44,8 @@ export function Quick() {
     setBusy(true)
     setResult(null)
     try {
-      const { id, wavBase64 } = await ipc.quick.synth(text, voice, style, instruction)
-      setResult({ id, src: `data:audio/wav;base64,${wavBase64}` })
+      const { id, wavBase64, costUsd } = await ipc.quick.synth(text, voice, style, instruction, scene)
+      setResult({ id, src: `data:audio/wav;base64,${wavBase64}`, cost: costUsd })
       refreshQuota()
     } catch (e) {
       toast.error((e as Error).message || 'Tạo thất bại')
@@ -78,10 +80,15 @@ export function Quick() {
         </div>
       </Card>
 
-      {/* voice instruction (saved) */}
-      <Field label="Yêu cầu giọng (được lưu lại)" hint="Mô tả giọng mong muốn — giữ cố định để đồng nhất. VD: giọng nam miền Bắc, truyền cảm, phù hợp video TVC.">
-        <Input value={instruction} onChange={(e) => setInstruction(e.target.value)} onBlur={saveInstruction} placeholder="VD: Giọng nam miền Bắc, trầm ấm, truyền cảm, phù hợp quảng cáo TVC." />
-      </Field>
+      {/* context + scene (saved) */}
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Context — mô tả giọng (lưu lại)" hint="VD: giọng nam miền Bắc, truyền cảm, hợp TVC.">
+          <Input value={instruction} onChange={(e) => setInstruction(e.target.value)} onBlur={saveDefaults} placeholder="Giọng nam miền Bắc, trầm ấm, truyền cảm…" />
+        </Field>
+        <Field label="Scene — bối cảnh (lưu lại)" hint="VD: quảng cáo sôi động, kêu gọi mua ngay.">
+          <Input value={scene} onChange={(e) => setScene(e.target.value)} onBlur={saveDefaults} placeholder="Quảng cáo sôi động, kêu gọi mua ngay…" />
+        </Field>
+      </div>
 
       {/* style presets */}
       <div className="flex flex-col gap-2">
@@ -119,7 +126,12 @@ export function Quick() {
 
       {result && (
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-          <Card className="p-5"><AudioPlayer src={result.src} autoPlay /></Card>
+          <Card className="p-5">
+            <AudioPlayer src={result.src} autoPlay />
+            {result.cost > 0 && (
+              <p className="tnum mt-3 text-xs text-ink-faint">Chi phí: ${result.cost.toFixed(5)}</p>
+            )}
+          </Card>
         </motion.div>
       )}
     </div>

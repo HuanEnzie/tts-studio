@@ -5,11 +5,19 @@ import { join } from 'path'
 import { store } from '../services/store'
 import { encrypt, decrypt, maskKey } from '../services/crypto'
 import { validateKey, synthesize, TtsError } from '../services/gemini'
-import { quotaSummary, hasUsableKey, synthOne } from '../services/engine'
+import {
+  quotaSummary,
+  hasUsableKey,
+  synthOne,
+  recordSpend,
+  rowCostUsd,
+  costSummary
+} from '../services/engine'
 import {
   startBatch,
   stopBatch,
   regenRow,
+  retryFailed,
   batchEvents,
   isRunning
 } from '../services/queue'
@@ -19,13 +27,15 @@ import { pacificDateString } from '../core/pacific'
 import { buildFilename, projectFolderName } from '../core/filename'
 import { buildSpokenPrompt } from '../core/prompt'
 import { applyDictionary } from '../core/dictionary'
+import { estimateBatch } from '../core/pricing'
 import {
   DEFAULT_SETTINGS,
   type Project,
   type Row,
   type ProjectSettings,
   type DictEntry,
-  type KeyTier
+  type KeyTier,
+  type VoicePreset
 } from '../core/types'
 
 type RowInput = { text: string; voice?: string; style?: string }
@@ -48,8 +58,10 @@ function defaultProjectSettings(): ProjectSettings {
     voice: s.defaultVoice,
     style: s.defaultStyle,
     voiceInstruction: s.voiceInstruction,
+    scene: s.scene,
     format: s.format,
-    filenameTemplate: s.filenameTemplate
+    filenameTemplate: s.filenameTemplate,
+    budgetUsd: 0
   }
 }
 
@@ -82,16 +94,14 @@ export function registerIpc(): void {
       account: k.account,
       active: k.active,
       tier: k.tier,
-      dailyLimit: k.dailyLimit,
       banned: k.banned,
       bannedReason: k.bannedReason,
       createdAt: k.createdAt
     }))
   )
   h('keys:add', (p: { label: string; account: string; key: string; tier?: KeyTier }) => {
-    const s = store()
     const id = randomUUID()
-    s.mutate((d) =>
+    store().mutate((d) =>
       d.keys.push({
         id,
         label: p.label || maskKey(p.key),
@@ -99,7 +109,6 @@ export function registerIpc(): void {
         enc: encrypt(p.key.trim()),
         active: true,
         tier: p.tier ?? 'free',
-        dailyLimit: s.settings.dailyLimitPerKey,
         banned: false,
         createdAt: Date.now()
       })
@@ -107,10 +116,9 @@ export function registerIpc(): void {
     return id
   })
   h('keys:addBulk', (p: { text: string; tier?: KeyTier }) => {
-    const s = store()
     let added = 0
     const lines = p.text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
-    s.mutate((d) => {
+    store().mutate((d) => {
       for (const line of lines) {
         const parts = line.split(',').map((x) => x.trim())
         let label = '', account = '', key = ''
@@ -125,7 +133,6 @@ export function registerIpc(): void {
           enc: encrypt(key),
           active: true,
           tier: p.tier ?? 'free',
-          dailyLimit: s.settings.dailyLimitPerKey,
           banned: false,
           createdAt: Date.now()
         })
@@ -134,7 +141,7 @@ export function registerIpc(): void {
     })
     return added
   })
-  h('keys:update', (p: { id: string; patch: { label?: string; account?: string; active?: boolean; tier?: KeyTier; dailyLimit?: number; banned?: boolean } }) => {
+  h('keys:update', (p: { id: string; patch: { label?: string; account?: string; active?: boolean; tier?: KeyTier; banned?: boolean } }) => {
     store().mutate((d) => {
       const k = d.keys.find((x) => x.id === p.id)
       if (k) {
@@ -185,13 +192,15 @@ export function registerIpc(): void {
     // 3) Gemini TTS call
     let pcm: Buffer
     try {
-      pcm = await synthesize({
+      const r = await synthesize({
         text: 'Xin chào',
         voice: s.settings.defaultVoice,
         model: s.settings.model,
         apiKey: key,
-        proxyUrl: s.settings.proxyUrl
+        proxyUrl: s.settings.proxyUrl,
+        timeoutMs: (s.settings.requestTimeoutSec || 120) * 1000
       })
+      pcm = r.pcm
     } catch (e) {
       if (e instanceof TtsError) {
         if (e.geoBlocked) return { ok: false, stage: 'Gemini (vùng)', message: e.message }
@@ -337,18 +346,65 @@ export function registerIpc(): void {
   h('batch:regenRow', (p: { id: string; rowId: string }) => {
     regenRow(p.id, p.rowId)
   })
+  h('batch:retryFailed', (p: { id: string }) => retryFailed(p.id))
+  h('batch:estimate', (p: { id: string }) => {
+    const s = store()
+    const pr = s.projects.find((x) => x.id === p.id)
+    const pending = pr ? pr.rows.filter((r) => r.status === 'pending' || r.status === 'error') : []
+    return estimateBatch(
+      pending.map((r) => r.text),
+      s.settings.priceInputPerM,
+      s.settings.priceAudioPerM
+    )
+  })
+
+  // ---- cost ----
+  h('cost:summary', () => costSummary())
+
+  // ---- presets ----
+  h('presets:list', () => store().presets)
+  h('presets:add', (p: { name: string; voice: string; context: string; scene: string; style: string }) => {
+    const preset: VoicePreset = { id: randomUUID(), ...p }
+    store().mutate((d) => d.presets.push(preset))
+    return preset
+  })
+  h('presets:update', (p: { id: string; patch: Partial<VoicePreset> }) => {
+    store().mutate((d) => {
+      const e = d.presets.find((x) => x.id === p.id)
+      if (e) Object.assign(e, p.patch)
+    })
+  })
+  h('presets:remove', (p: { id: string }) => {
+    store().mutate((d) => {
+      d.presets = d.presets.filter((x) => x.id !== p.id)
+    })
+  })
+  h('presets:apply', (p: { id: string; projectId: string }) => {
+    store().mutate((d) => {
+      const preset = d.presets.find((x) => x.id === p.id)
+      const pr = d.projects.find((x) => x.id === p.projectId)
+      if (preset && pr) {
+        pr.settings.voice = preset.voice
+        pr.settings.voiceInstruction = preset.context
+        pr.settings.scene = preset.scene
+        pr.settings.style = preset.style
+        pr.updatedAt = Date.now()
+      }
+    })
+    return store().projects.find((x) => x.id === p.projectId) ?? null
+  })
 
   // ---- quick ----
-  h('quick:synth', async (p: { text: string; voice: string; style: string; instruction?: string }) => {
+  h('quick:synth', async (p: { text: string; voice: string; style: string; instruction?: string; scene?: string }) => {
     const dictText = applyDictionary(p.text, store().dictionary)
-    const text = buildSpokenPrompt({ instruction: p.instruction, style: p.style, text: dictText })
-    const pcm = await synthOne(text, p.voice)
+    const text = buildSpokenPrompt({ instruction: p.instruction, scene: p.scene, style: p.style, text: dictText })
+    const r = await synthOne(text, p.voice)
+    recordSpend(r.inputTokens, r.outputTokens, r.paid)
     const id = randomUUID()
-    quickCache.set(id, pcm)
-    // cap cache
+    quickCache.set(id, r.pcm)
     if (quickCache.size > 12) quickCache.delete(quickCache.keys().next().value as string)
-    const wav = pcmToWavBuffer(pcm)
-    return { id, wavBase64: wav.toString('base64') }
+    const wav = pcmToWavBuffer(r.pcm)
+    return { id, wavBase64: wav.toString('base64'), costUsd: r.paid ? rowCostUsd(r.inputTokens, r.outputTokens) : 0 }
   })
   h('quick:save', async (p: { id: string; suggested: string; format: 'mp3' | 'wav' }) => {
     const pcm = quickCache.get(p.id)

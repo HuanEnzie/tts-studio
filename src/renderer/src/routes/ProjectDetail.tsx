@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ChevronLeft, Play, Square, FolderInput, Plus, Upload, RefreshCw,
-  Pencil, Trash2, Volume2, Loader2
+  Pencil, Trash2, Volume2, Loader2, ListRestart, DollarSign
 } from 'lucide-react'
 import { Button } from '../design/Button'
 import { Badge, type Status } from '../design/Badge'
@@ -17,7 +17,7 @@ import { useQuota } from '../store/quota'
 import { toast } from '../store/toast'
 import { parseLines, parseDelimited } from '@shared/csv'
 import { buildFilename } from '@shared/filename'
-import { VOICES, type Row, type RowStatus } from '@shared/types'
+import { VOICES, type Row, type RowStatus, type VoicePreset, type BatchEstimate } from '@shared/types'
 
 const rowStatus: Record<RowStatus, Status> = {
   pending: 'pending', running: 'running', done: 'done', error: 'error'
@@ -31,9 +31,12 @@ export function ProjectDetail() {
   const [running, setRunning] = useState(false)
   const [importing, setImporting] = useState(false)
   const [editing, setEditing] = useState<Row | null>(null)
+  const [presets, setPresets] = useState<VoicePreset[]>([])
+  const [confirmEst, setConfirmEst] = useState<BatchEstimate | null>(null)
 
   useEffect(() => {
     if (projectId) loadProject(projectId)
+    ipc.presets.list().then(setPresets)
   }, [projectId, loadProject])
 
   useEffect(() => {
@@ -53,12 +56,34 @@ export function ProjectDetail() {
   const total = p.rows.length
   const pending = p.rows.filter((r) => r.status === 'pending' || r.status === 'error').length
 
-  const start = async () => {
+  const errorCount = p.rows.filter((r) => r.status === 'error').length
+  const projectCost = p.rows.reduce((a, r) => a + (r.costUsd ?? 0), 0)
+
+  // estimate first, then confirm, then run
+  const askStart = async () => {
     if (pending === 0) { toast.info('Không còn dòng nào cần tạo'); return }
+    const est = await ipc.batch.estimate(p.id)
+    setConfirmEst(est)
+  }
+  const start = async () => {
+    setConfirmEst(null)
     setRunning(true)
     await ipc.batch.start(p.id)
   }
   const stop = async () => { await ipc.batch.stop(p.id); setRunning(false) }
+
+  const retryFailed = async () => {
+    const n = await ipc.batch.retryFailed(p.id)
+    await loadProject(p.id)
+    if (n > 0) askStart()
+  }
+
+  const applyPreset = async (id: string) => {
+    if (!id) return
+    await ipc.presets.apply(id, p.id)
+    await loadProject(p.id)
+    toast.success('Đã áp mẫu giọng')
+  }
 
   const update = async (settings: Partial<typeof p.settings>) => {
     await ipc.projects.update(p.id, settings)
@@ -94,11 +119,19 @@ export function ProjectDetail() {
             <Badge status={running ? 'running' : rowStatus[total && done === total ? 'done' : 'pending']} label={running ? 'Đang chạy' : `${done}/${total}`} />
           </div>
         </div>
+        {projectCost > 0 && (
+          <span className="tnum flex items-center gap-1 text-xs text-ink-muted" title="Chi phí dự án">
+            <DollarSign className="h-3.5 w-3.5" />{projectCost.toFixed(4)}
+          </span>
+        )}
         <Button variant="ghost" icon={<FolderInput className="h-4 w-4" />} onClick={() => ipc.sys.openProjectFolder(p.id)}>Folder</Button>
+        {!running && errorCount > 0 && (
+          <Button variant="secondary" icon={<ListRestart className="h-4 w-4" />} onClick={retryFailed}>Tạo lại lỗi ({errorCount})</Button>
+        )}
         {running ? (
           <Button variant="danger" icon={<Square className="h-4 w-4" />} onClick={stop}>Dừng</Button>
         ) : (
-          <Button variant="primary" icon={<Play className="h-4 w-4" />} onClick={start}>
+          <Button variant="primary" icon={<Play className="h-4 w-4" />} onClick={askStart}>
             Tạo {pending > 0 ? `(${pending})` : ''}
           </Button>
         )}
@@ -122,16 +155,36 @@ export function ProjectDetail() {
             </Select>
           </Field>
         </div>
-        <div className="min-w-[240px] flex-1">
+        <div className="w-32">
+          <Field label="Trần $ dự án" hint="0 = không">
+            <Input type="number" step="0.1" value={p.settings.budgetUsd} onChange={(e) => update({ budgetUsd: Math.max(0, Number(e.target.value) || 0) })} />
+          </Field>
+        </div>
+        <div className="min-w-[200px] flex-1">
           <Field label="Mẫu tên file" hint={<span className="text-ink-faint">Ví dụ: <span className="text-ink-muted">{filenamePreview}</span></span>}>
             <Input value={p.settings.filenameTemplate} onChange={(e) => update({ filenameTemplate: e.target.value })} />
           </Field>
         </div>
+        {presets.length > 0 && (
+          <div className="w-40">
+            <Field label="Áp mẫu giọng">
+              <Select value="" onChange={(e) => applyPreset(e.target.value)}>
+                <option value="">— chọn —</option>
+                {presets.map((pr) => <option key={pr.id} value={pr.id}>{pr.name}</option>)}
+              </Select>
+            </Field>
+          </div>
+        )}
         <Button variant="secondary" icon={<Upload className="h-4 w-4" />} onClick={() => setImporting(true)}>Thêm dòng</Button>
         </div>
-        <Field label="Yêu cầu giọng (áp cho mọi dòng trong dự án)" hint="Giữ cố định để các dòng đồng nhất giọng. VD: giọng nam miền Bắc, truyền cảm, phù hợp video TVC.">
-          <Input value={p.settings.voiceInstruction} onChange={(e) => update({ voiceInstruction: e.target.value })} placeholder="VD: Giọng nam miền Bắc, trầm ấm, truyền cảm, phù hợp quảng cáo TVC." />
-        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Context — mô tả giọng (mọi dòng)" hint="Giữ cố định để đồng nhất. VD: giọng nam miền Bắc, truyền cảm.">
+            <Input value={p.settings.voiceInstruction} onChange={(e) => update({ voiceInstruction: e.target.value })} placeholder="Giọng nam miền Bắc, trầm ấm, truyền cảm…" />
+          </Field>
+          <Field label="Scene — bối cảnh (mọi dòng)" hint="VD: quảng cáo sôi động, kêu gọi mua ngay.">
+            <Input value={p.settings.scene} onChange={(e) => update({ scene: e.target.value })} placeholder="Quảng cáo sôi động, kêu gọi mua ngay…" />
+          </Field>
+        </div>
       </div>
 
       {/* rows */}
@@ -160,6 +213,18 @@ export function ProjectDetail() {
         }
         setEditing(null)
       }} />
+
+      <Modal open={!!confirmEst} onClose={() => setConfirmEst(null)} title="Xác nhận tạo"
+        footer={<><Button variant="ghost" onClick={() => setConfirmEst(null)}>Hủy</Button><Button variant="primary" onClick={start}>Tạo {confirmEst?.requests} dòng</Button></>}>
+        {confirmEst && (
+          <div className="flex flex-col gap-2 text-sm text-ink-muted">
+            <div className="flex justify-between"><span>Số dòng cần tạo</span><span className="tnum text-ink">{confirmEst.requests}</span></div>
+            <div className="flex justify-between"><span>Token (ước tính)</span><span className="tnum text-ink">{confirmEst.inputTokens.toLocaleString()} in · {confirmEst.outputTokens.toLocaleString()} audio</span></div>
+            <div className="flex justify-between"><span>Chi phí ước tính (nếu dùng key Paid)</span><span className="tnum font-semibold text-ink">${confirmEst.costUsd.toFixed(4)}</span></div>
+            <p className="mt-1 text-xs text-ink-faint">Dùng key Free thì miễn phí. Dòng đã có trong cache sẽ không tốn thêm.</p>
+          </div>
+        )}
+      </Modal>
 
       {/* refresh quota when batch progresses */}
       <QuotaSync trigger={done} onSync={refreshQuota} />
@@ -191,6 +256,7 @@ function RowItem({ row, onRegen, onEdit, onRemove }: { row: Row; onRegen: () => 
         <span className="tnum w-7 shrink-0 text-xs text-ink-faint">{String(row.idx + 1).padStart(2, '0')}</span>
         <Badge status={rowStatus[row.status]} />
         <p className="min-w-0 flex-1 truncate text-sm text-ink" title={row.text}>{row.text}</p>
+        {row.cached && <span className="shrink-0 rounded-md bg-accent-soft px-2 py-0.5 text-xs text-accent-to" title="Dùng lại từ cache, không tốn phí">cache</span>}
         <span className="hidden shrink-0 rounded-md bg-surface-hover px-2 py-0.5 text-xs text-ink-muted sm:block">{row.voice}</span>
         <div className="flex shrink-0 items-center gap-1">
           {row.status === 'done' && row.filePath && (

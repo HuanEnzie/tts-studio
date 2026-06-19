@@ -52,6 +52,8 @@ interface SynthOpts {
   model: string
   apiKey: string
   proxyUrl?: string
+  /** abort the request after this many ms (0/undefined = no timeout) */
+  timeoutMs?: number
   signal?: AbortSignal
 }
 
@@ -59,10 +61,21 @@ interface GeminiResponse {
   candidates?: {
     content?: { parts?: { inlineData?: { data?: string; mimeType?: string } }[] }
   }[]
+  usageMetadata?: {
+    promptTokenCount?: number
+    candidatesTokenCount?: number
+    candidatesTokensDetails?: { modality?: string; tokenCount?: number }[]
+  }
   error?: { code?: number; message?: string; status?: string }
 }
 
-export async function synthesize(opts: SynthOpts): Promise<Buffer> {
+export interface SynthResult {
+  pcm: Buffer
+  inputTokens: number
+  outputTokens: number
+}
+
+export async function synthesize(opts: SynthOpts): Promise<SynthResult> {
   const url = `${ENDPOINT}/${opts.model}:generateContent`
   const body = {
     contents: [{ parts: [{ text: opts.text }] }],
@@ -73,6 +86,12 @@ export async function synthesize(opts: SynthOpts): Promise<Buffer> {
       }
     }
   }
+
+  // Per-request timeout so a stalled call can't hang the whole pipeline.
+  const ctrl = new AbortController()
+  const timer = opts.timeoutMs && opts.timeoutMs > 0 ? setTimeout(() => ctrl.abort(), opts.timeoutMs) : null
+  const onUserAbort = () => ctrl.abort()
+  opts.signal?.addEventListener('abort', onUserAbort, { once: true })
 
   let res: Response
   try {
@@ -85,13 +104,22 @@ export async function synthesize(opts: SynthOpts): Promise<Buffer> {
           'x-goog-api-key': opts.apiKey
         },
         body: JSON.stringify(body),
-        signal: opts.signal
+        signal: ctrl.signal
       },
       opts.proxyUrl
     )
   } catch (e) {
-    // network failure — worth retrying with another key / later
-    throw new TtsError(`Lỗi mạng: ${(e as Error).message}`, 0, true, false)
+    if (opts.signal?.aborted) throw e // user stopped the batch — let it propagate
+    const timedOut = ctrl.signal.aborted
+    throw new TtsError(
+      timedOut ? `Quá thời gian chờ (${Math.round((opts.timeoutMs ?? 0) / 1000)}s) — bỏ qua, thử key khác.` : `Lỗi mạng: ${(e as Error).message}`,
+      0,
+      true,
+      false
+    )
+  } finally {
+    if (timer) clearTimeout(timer)
+    opts.signal?.removeEventListener('abort', onUserAbort)
   }
 
   const json = (await res.json().catch(() => ({}))) as GeminiResponse
@@ -118,7 +146,13 @@ export async function synthesize(opts: SynthOpts): Promise<Buffer> {
   if (!b64) {
     throw new TtsError('Phản hồi không có dữ liệu audio', res.status, false, false)
   }
-  return Buffer.from(b64, 'base64')
+  const u = json.usageMetadata
+  const audioDetail = u?.candidatesTokensDetails?.find((d) => d.modality === 'AUDIO')
+  return {
+    pcm: Buffer.from(b64, 'base64'),
+    inputTokens: u?.promptTokenCount ?? 0,
+    outputTokens: audioDetail?.tokenCount ?? u?.candidatesTokenCount ?? 0
+  }
 }
 
 /** Lightweight validity check for a key: returns true if the key authenticates. */

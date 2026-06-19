@@ -9,7 +9,7 @@ import { Field, Input, Textarea, Select } from '../design/Input'
 import { ipc, type KeyMeta } from '../lib/ipc'
 import { useQuota } from '../store/quota'
 import { toast } from '../store/toast'
-import type { KeyView, KeyTier } from '@shared/types'
+import { TIER_LABELS, TIER_LIMITS, type KeyView, type KeyTier } from '@shared/types'
 
 export function Keys() {
   const [keys, setKeys] = useState<KeyMeta[]>([])
@@ -56,8 +56,10 @@ export function Keys() {
           {keys.map((k, i) => {
             const u = usageOf(k.id)
             const used = u?.used ?? 0
-            const isPaid = k.tier === 'paid'
-            const pct = !isPaid && k.dailyLimit ? Math.min(100, (used / k.dailyLimit) * 100) : 0
+            const tl = TIER_LIMITS[k.tier]
+            const isUnlimited = tl.rpd === null
+            const cap = tl.rpd ?? 0
+            const pct = !isUnlimited && cap ? Math.min(100, (used / cap) * 100) : 0
             return (
               <motion.div key={k.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}
                 className={'flex items-center gap-3 rounded-xl border bg-surface px-4 py-3 ' + (k.banned ? 'border-status-error/40' : 'border-border')}>
@@ -86,30 +88,24 @@ export function Keys() {
                   value={k.tier}
                   onChange={(e) => update(k.id, { tier: e.target.value as KeyTier })}
                   className="h-8 rounded-lg border border-border bg-surface px-2 text-xs text-ink outline-none"
+                  title={`${tl.rpm} req/phút · ${isUnlimited ? 'không giới hạn' : tl.rpd + ' /ngày'}`}
                 >
-                  <option value="free">Free</option>
-                  <option value="paid">Paid</option>
+                  {(Object.keys(TIER_LABELS) as KeyTier[]).map((t) => (
+                    <option key={t} value={t}>{TIER_LABELS[t]}</option>
+                  ))}
                 </select>
 
                 {/* usage */}
                 <div className="w-44">
-                  {isPaid ? (
+                  {isUnlimited ? (
                     <div className="text-xs text-ink-muted">
-                      <span className="tnum text-ink">{used}</span> lượt hôm nay <span className="text-ink-faint">(tính phí)</span>
+                      <span className="tnum text-ink">{used}</span> lượt hôm nay <span className="text-ink-faint">· {tl.rpm}/phút</span>
                     </div>
                   ) : (
                     <>
                       <div className="flex items-center justify-between text-xs">
-                        <span className="text-ink-muted">Hôm nay</span>
-                        <span className={'tnum ' + (u?.exhausted ? 'text-status-error' : 'text-ink-muted')}>
-                          {used}/
-                          <input
-                            type="number"
-                            value={k.dailyLimit}
-                            onChange={(e) => update(k.id, { dailyLimit: Math.max(1, Number(e.target.value) || 1) })}
-                            className="tnum w-12 bg-transparent text-ink outline-none focus:underline"
-                          />
-                        </span>
+                        <span className="text-ink-muted">{tl.rpm}/phút</span>
+                        <span className={'tnum ' + (u?.exhausted ? 'text-status-error' : 'text-ink-muted')}>{used}/{cap}</span>
                       </div>
                       <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-hover">
                         <div className={'h-full rounded-full ' + (u?.exhausted ? 'bg-status-error' : 'bg-accent-gradient')} style={{ width: `${pct}%` }} />
@@ -175,10 +171,11 @@ function AddKeyModal({ open, onClose, onDone }: { open: boolean; onClose: () => 
           <Button size="sm" variant={tab === 'single' ? 'primary' : 'secondary'} onClick={() => setTab('single')}>Một key</Button>
           <Button size="sm" variant={tab === 'bulk' ? 'primary' : 'secondary'} onClick={() => setTab('bulk')}>Nhiều key</Button>
         </div>
-        <Field label="Tier" hint="Free = giới hạn lượt/ngày. Paid = không giới hạn, đếm như chi phí.">
+        <Field label="Tier" hint="Free 3/phút·10/ngày · T1 10/phút·100/ngày · T2 1000/phút·10k/ngày · T3 1000/phút·không giới hạn. T1-T3 tính phí.">
           <Select value={tier} onChange={(e) => setTier(e.target.value as KeyTier)}>
-            <option value="free">Free (có giới hạn ngày)</option>
-            <option value="paid">Paid (không giới hạn)</option>
+            {(Object.keys(TIER_LABELS) as KeyTier[]).map((t) => (
+              <option key={t} value={t}>{TIER_LABELS[t]} ({TIER_LIMITS[t].rpm}/phút{TIER_LIMITS[t].rpd === null ? ', ∞/ngày' : ', ' + TIER_LIMITS[t].rpd + '/ngày'})</option>
+            ))}
           </Select>
         </Field>
         {tab === 'single' ? (

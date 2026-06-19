@@ -8,8 +8,22 @@ import {
   type ApiKey,
   type KeyQuota,
   type Project,
-  type DictEntry
+  type DictEntry,
+  type VoicePreset
 } from '../core/types'
+
+export interface DailySpend {
+  datePt: string
+  usd: number
+  inputTokens: number
+  outputTokens: number
+}
+
+export interface CacheEntry {
+  filePath: string
+  inputTokens: number
+  outputTokens: number
+}
 
 interface DbShape {
   version: number
@@ -18,6 +32,9 @@ interface DbShape {
   quota: Record<string, KeyQuota>
   projects: Project[]
   dictionary: DictEntry[]
+  presets: VoicePreset[]
+  cache: Record<string, CacheEntry>
+  spend: DailySpend
 }
 
 function emptyDb(): DbShape {
@@ -30,7 +47,10 @@ function emptyDb(): DbShape {
     keys: [],
     quota: {},
     projects: [],
-    dictionary: []
+    dictionary: [],
+    presets: [],
+    cache: {},
+    spend: { datePt: '', usd: 0, inputTokens: 0, outputTokens: 0 }
   }
 }
 
@@ -61,16 +81,19 @@ class Store {
       if (LEGACY_TTS_MODELS.includes(data.settings.model)) {
         data.settings.model = DEFAULT_SETTINGS.model
       }
-      // backfill voiceInstruction for projects created before the field existed
+      // backfill new project-settings fields
       for (const p of data.projects) {
-        if (p.settings && typeof p.settings.voiceInstruction !== 'string') {
-          p.settings.voiceInstruction = ''
-        }
+        if (!p.settings) continue
+        if (typeof p.settings.voiceInstruction !== 'string') p.settings.voiceInstruction = ''
+        if (typeof p.settings.scene !== 'string') p.settings.scene = ''
+        if (typeof p.settings.budgetUsd !== 'number') p.settings.budgetUsd = 0
       }
-      // backfill per-key tier/limit/banned for keys created before these existed
+      // migrate keys: old 'free'|'paid' -> tier scheme; backfill banned
+      const validTiers = ['free', 'tier1', 'tier2', 'tier3']
       for (const k of data.keys) {
-        if (k.tier !== 'free' && k.tier !== 'paid') k.tier = 'free'
-        if (typeof k.dailyLimit !== 'number') k.dailyLimit = data.settings.dailyLimitPerKey
+        const t = k.tier as string
+        if (t === 'paid') k.tier = 'tier3'
+        else if (!validTiers.includes(t)) k.tier = 'free'
         if (typeof k.banned !== 'boolean') k.banned = false
       }
       return data
@@ -125,6 +148,15 @@ class Store {
   }
   get dictionary(): DictEntry[] {
     return this.data.dictionary
+  }
+  get presets(): VoicePreset[] {
+    return this.data.presets
+  }
+  get cache(): Record<string, CacheEntry> {
+    return this.data.cache
+  }
+  get spend(): DailySpend {
+    return this.data.spend
   }
 
   mutate(fn: (d: DbShape) => void): void {

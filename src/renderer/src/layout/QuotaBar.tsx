@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Timer, KeyRound } from 'lucide-react'
+import { Timer, KeyRound, DollarSign } from 'lucide-react'
 import { msUntilPacificMidnight } from '@shared/pacific'
 import { useQuota } from '../store/quota'
+import { ipc } from '../lib/ipc'
+import type { CostSummary } from '@shared/types'
 
 function fmtCountdown(ms: number): string {
   const total = Math.floor(ms / 1000)
@@ -15,11 +17,16 @@ export function QuotaBar() {
   const summary = useQuota((s) => s.summary)
   const refresh = useQuota((s) => s.refresh)
   const [ms, setMs] = useState(() => msUntilPacificMidnight(new Date()))
+  const [cost, setCost] = useState<CostSummary | null>(null)
 
   useEffect(() => {
-    refresh()
+    const load = () => {
+      refresh()
+      ipc.cost.summary().then(setCost).catch(() => {})
+    }
+    load()
     const tick = setInterval(() => setMs(msUntilPacificMidnight(new Date())), 1000)
-    const poll = setInterval(() => refresh(), 5000)
+    const poll = setInterval(load, 5000)
     return () => {
       clearInterval(tick)
       clearInterval(poll)
@@ -56,6 +63,21 @@ export function QuotaBar() {
           </span>
         )}
       </div>
+
+      {cost && (
+        <div
+          className={
+            'flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs ' +
+            (cost.dailyBudgetUsd > 0 && cost.todayUsd >= cost.dailyBudgetUsd
+              ? 'border-status-error/40 text-status-error'
+              : 'border-border text-ink-muted')
+          }
+          title="Chi tiêu hôm nay"
+        >
+          <DollarSign className="h-3.5 w-3.5" />
+          <span className="tnum">{cost.todayUsd.toFixed(3)}{cost.dailyBudgetUsd > 0 ? ` / ${cost.dailyBudgetUsd}` : ''}</span>
+        </div>
+      )}
 
       <div className="flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1">
         <div className="relative h-4 w-4">

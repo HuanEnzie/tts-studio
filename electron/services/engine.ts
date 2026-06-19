@@ -10,15 +10,21 @@ import {
   selectScheduled,
   type KeyState
 } from '../core/keypool'
-import type { ApiKey, KeyQuota, QuotaSummary } from '../core/types'
+import { costUsd } from '../core/pricing'
+import {
+  TIER_LIMITS,
+  type ApiKey,
+  type KeyQuota,
+  type QuotaSummary,
+  type CostSummary
+} from '../core/types'
 
 // per-key last-dispatch time (epoch ms) for RPM throttling, in-memory per session
 const lastCallAt = new Map<string, number>()
 
-function minIntervalMs(key: ApiKey, freeRpm: number): number {
-  if (key.tier === 'paid') return 0
-  const rpm = key.rpm && key.rpm > 0 ? key.rpm : Math.max(1, freeRpm)
-  return Math.ceil(60_000 / rpm)
+function minIntervalMs(key: ApiKey): number {
+  const rpm = TIER_LIMITS[key.tier].rpm
+  return Math.ceil(60_000 / Math.max(1, rpm))
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -81,28 +87,84 @@ export function quotaSummary(): QuotaSummary {
     freeTotal: ft.total,
     paidUsed: paidUsed(st),
     activeKeys: s.keys.filter((k) => k.active && !k.banned).length,
-    keys: st.map((x) => ({
-      id: x.key.id,
-      label: x.key.label,
-      account: x.key.account,
-      active: x.key.active,
-      tier: x.key.tier,
-      banned: x.key.banned,
-      used:
-        x.key.tier === 'paid'
-          ? x.quota.count
-          : x.quota.exhausted
-            ? x.key.dailyLimit
-            : Math.min(x.key.dailyLimit, x.quota.count),
-      limit: x.key.tier === 'paid' ? 0 : x.key.dailyLimit,
-      exhausted: x.quota.exhausted
-    }))
+    keys: st.map((x) => {
+      const lim = TIER_LIMITS[x.key.tier]
+      const cap = lim.rpd
+      return {
+        id: x.key.id,
+        label: x.key.label,
+        account: x.key.account,
+        active: x.key.active,
+        tier: x.key.tier,
+        banned: x.key.banned,
+        used:
+          cap === null
+            ? x.quota.count
+            : x.quota.exhausted
+              ? cap
+              : Math.min(cap, x.quota.count),
+        limit: cap ?? 0,
+        rpm: lim.rpm,
+        exhausted: x.quota.exhausted
+      }
+    })
   }
 }
 
 export function hasUsableKey(): boolean {
   ensureFresh()
   return hasCapacity(states())
+}
+
+/** Reset the global daily spend counter when the Pacific day changes. */
+function freshSpend(): void {
+  const today = pacificDateString(new Date())
+  const s = store()
+  if (s.spend.datePt !== today) {
+    s.mutate((d) => {
+      d.spend = { datePt: today, usd: 0, inputTokens: 0, outputTokens: 0 }
+    })
+  }
+}
+
+/** Record usage after a successful generation. Returns the USD cost (0 if free). */
+export function recordSpend(inputTokens: number, outputTokens: number, paid: boolean): number {
+  freshSpend()
+  if (!paid) return 0
+  const s = store()
+  const cost = costUsd(
+    inputTokens,
+    outputTokens,
+    s.settings.priceInputPerM,
+    s.settings.priceAudioPerM
+  )
+  s.mutate((d) => {
+    d.spend.usd += cost
+    d.spend.inputTokens += inputTokens
+    d.spend.outputTokens += outputTokens
+  })
+  return cost
+}
+
+export function rowCostUsd(inputTokens: number, outputTokens: number): number {
+  const s = store()
+  return costUsd(inputTokens, outputTokens, s.settings.priceInputPerM, s.settings.priceAudioPerM)
+}
+
+export function costSummary(): CostSummary {
+  freshSpend()
+  const s = store()
+  return {
+    todayUsd: s.spend.usd,
+    todayInputTokens: s.spend.inputTokens,
+    todayOutputTokens: s.spend.outputTokens,
+    dailyBudgetUsd: s.settings.dailyBudgetUsd
+  }
+}
+
+export function spendTodayUsd(): number {
+  freshSpend()
+  return store().spend.usd
 }
 
 function banKey(id: string, reason: string): void {
@@ -137,15 +199,22 @@ function capacityError(): Error {
  * Synthesize one chunk, rotating across keys (free first, then paid). 429 marks
  * the key exhausted for the day; 403 bans it (engine never touches `active`).
  */
+export interface SynthOneResult {
+  pcm: Buffer
+  inputTokens: number
+  outputTokens: number
+  paid: boolean
+}
+
 export async function synthOne(
   text: string,
   voice: string,
   signal?: AbortSignal
-): Promise<Buffer> {
+): Promise<SynthOneResult> {
   const s = store()
   const model = s.settings.model
   const proxyUrl = s.settings.proxyUrl
-  const freeRpm = s.settings.freeRpm
+  const timeoutMs = (s.settings.requestTimeoutSec || 120) * 1000
 
   for (let attempt = 0; attempt < s.keys.length + 1; attempt++) {
     ensureFresh()
@@ -153,7 +222,7 @@ export async function synthOne(
       states(),
       Date.now(),
       (id) => lastCallAt.get(id) ?? 0,
-      (key) => minIntervalMs(key, freeRpm)
+      (key) => minIntervalMs(key)
     )
     if (!sched) throw capacityError()
     if (sched.waitMs > 0) await sleep(sched.waitMs, signal) // respect per-key RPM
@@ -169,11 +238,16 @@ export async function synthOne(
     }
 
     try {
-      const pcm = await synthesize({ text, voice, model, apiKey, proxyUrl, signal })
+      const r = await synthesize({ text, voice, model, apiKey, proxyUrl, timeoutMs, signal })
       s.mutate((d) => {
         d.quota[picked.key.id].count += 1
       })
-      return pcm
+      return {
+        pcm: r.pcm,
+        inputTokens: r.inputTokens,
+        outputTokens: r.outputTokens,
+        paid: TIER_LIMITS[picked.key.tier].paid
+      }
     } catch (e) {
       if (e instanceof TtsError) {
         if (e.geoBlocked) throw e // location issue — rotating keys won't help

@@ -66,17 +66,16 @@ async function runSelfTest(): Promise<void> {
         enc: encrypt((process.env['SELFTEST_KEY'] as string).trim()),
         active: true,
         tier: 'free',
-        dailyLimit: 10,
         banned: false,
         createdAt: 0
       })
     )
-    const pcm = await synthOne(
+    const r = await synthOne(
       'Giọng nam miền Bắc, truyền cảm: Xin chào, đây là bản kiểm tra tạo giọng.',
       'Charon'
     )
     const out = join(process.cwd(), 'shots', 'selftest.mp3')
-    await writeAudio(pcm, out, 'mp3')
+    await writeAudio(r.pcm, out, 'mp3')
     console.log('SELFTEST OK bytes=' + statSync(out).size)
     app.exit(0)
   } catch (e) {
