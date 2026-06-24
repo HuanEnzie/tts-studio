@@ -1,6 +1,6 @@
 {
   "name": "tts-studio",
-  "version": "0.1.9",
+  "version": "0.2.0",
   "description": "Batch TTS desktop app powered by Gemini with multi-key rotation",
   "main": "out/main/main.js",
   "author": {
