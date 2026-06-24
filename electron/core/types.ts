@@ -67,11 +67,14 @@ export interface Row {
 
 export interface ProjectSettings {
   voice: string
+  /** delivery style applied to all rows, e.g. "đọc vui vẻ" */
   style: string
   /** persona/voice brief, e.g. "giọng nam miền Bắc, truyền cảm" (Context) */
   voiceInstruction: string
   /** situational setting, e.g. "quảng cáo sôi động, kêu gọi mua ngay" (Scene) */
   scene: string
+  /** BCP-47 language code, default vi-VN */
+  languageCode: string
   /** sampling temperature (lower = more consistent across rows) */
   temperature: number
   /** fixed RNG seed — keeps tone consistent across rows in this project */
@@ -107,6 +110,7 @@ export interface VoicePreset {
   context: string // -> voiceInstruction
   scene: string
   style: string
+  languageCode: string
   temperature: number
   seed: number
 }
@@ -124,6 +128,10 @@ export interface AppSettings {
   temperature: number
   /** default seed for new projects / Quick */
   seed: number
+  /** default BCP-47 language code */
+  languageCode: string
+  /** separator used to split pasted text into rows (default ###) */
+  lineSeparator: string
   filenameTemplate: string
   format: 'mp3' | 'wav'
   /** how many rows to generate in parallel */
@@ -178,6 +186,24 @@ export interface BatchEstimate {
   costUsd: number
 }
 
+export const LANGS: { code: string; label: string }[] = [
+  { code: 'vi-VN', label: 'Tiếng Việt' },
+  { code: 'en-US', label: 'English (US)' },
+  { code: 'en-GB', label: 'English (UK)' },
+  { code: 'ja-JP', label: '日本語' },
+  { code: 'ko-KR', label: '한국어' },
+  { code: 'zh-CN', label: '中文' },
+  { code: 'fr-FR', label: 'Français' },
+  { code: 'es-US', label: 'Español' },
+  { code: 'th-TH', label: 'ไทย' },
+  { code: 'id-ID', label: 'Indonesia' }
+]
+
+export const STYLE_PRESETS = [
+  'Đọc vui vẻ', 'Đọc nghiêm túc', 'Đọc chậm rãi', 'Đọc hào hứng',
+  'Giọng tâm sự', 'Đọc truyền cảm', 'Trò chuyện tự nhiên'
+]
+
 export const VOICES = [
   'Kore', 'Puck', 'Zephyr', 'Charon', 'Fenrir', 'Aoede',
   'Leda', 'Orus', 'Callirrhoe', 'Autonoe', 'Enceladus', 'Iapetus',
@@ -195,6 +221,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   scene: '',
   temperature: 1,
   seed: 42,
+  languageCode: 'vi-VN',
+  lineSeparator: '###',
   filenameTemplate: '{date}_{project}_{index}_{slug}',
   format: 'mp3',
   concurrency: 4,

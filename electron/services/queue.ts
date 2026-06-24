@@ -1,6 +1,5 @@
 import { EventEmitter } from 'events'
-import { mkdirSync, existsSync } from 'fs'
-import { copyFile } from 'fs/promises'
+import { mkdirSync } from 'fs'
 import { join } from 'path'
 import { store } from './store'
 import {
@@ -15,7 +14,6 @@ import { writeAudio } from './audio'
 import { applyDictionary } from '../core/dictionary'
 import { buildSpokenPrompt } from '../core/prompt'
 import { estimateTokens } from '../core/pricing'
-import { contentHash } from '../core/cachekey'
 import { buildFilename, projectFolderName } from '../core/filename'
 import { pacificDateString } from '../core/pacific'
 import type { Project, Row, ProjectStatus } from '../core/types'
@@ -106,9 +104,9 @@ async function processRow(project: Project, row: Row, signal: AbortSignal): Prom
   const dictText = applyDictionary(row.text, s.dictionary)
   const context = project.settings.voiceInstruction
   const scene = project.settings.scene
-  const style = row.style
-  const voice = row.voice || project.settings.voice
-  const model = s.settings.model
+  const style = project.settings.style
+  const voice = project.settings.voice
+  const languageCode = project.settings.languageCode
   const ext = project.settings.format
 
   const dir = outDirFor(project)
@@ -124,25 +122,6 @@ async function processRow(project: Project, row: Row, signal: AbortSignal): Prom
   const outPath = join(dir, `${base}.${ext}`)
   const temperature = project.settings.temperature
   const seed = project.settings.seed
-  const hash = contentHash({ model, voice, context, scene, style, text: dictText, temperature, seed })
-
-  // cache: reuse a prior identical clip instead of paying again
-  if (s.settings.cacheEnabled) {
-    const c = s.cache[hash]
-    if (c && existsSync(c.filePath)) {
-      if (c.filePath !== outPath) await copyFile(c.filePath, outPath).catch(() => {})
-      const updated = setRow(project.id, row.id, {
-        status: 'done',
-        filePath: existsSync(outPath) ? outPath : c.filePath,
-        cached: true,
-        inputTokens: 0,
-        outputTokens: 0,
-        costUsd: 0
-      })
-      emit(project.id, { row: updated })
-      return
-    }
-  }
 
   // budget pre-check using an estimate (real cost recorded after)
   const est = estimateTokens(dictText)
@@ -155,17 +134,10 @@ async function processRow(project: Project, row: Row, signal: AbortSignal): Prom
   }
 
   const prompt = buildSpokenPrompt({ instruction: context, scene, style, text: dictText })
-  const r = await synthOne(prompt, voice, { temperature, seed, signal })
+  const r = await synthOne(prompt, voice, { temperature, seed, languageCode, signal })
   await writeAudio(r.pcm, outPath, ext)
   const cost = recordSpend(r.inputTokens, r.outputTokens, r.paid)
 
-  s.mutate((d) => {
-    d.cache[hash] = {
-      filePath: outPath,
-      inputTokens: r.inputTokens,
-      outputTokens: r.outputTokens
-    }
-  })
   const updated = setRow(project.id, row.id, {
     status: 'done',
     filePath: outPath,
@@ -177,8 +149,9 @@ async function processRow(project: Project, row: Row, signal: AbortSignal): Prom
   emit(project.id, { row: updated })
 }
 
-export async function startBatch(projectId: string): Promise<void> {
+export async function startBatch(projectId: string, onlyIds?: string[]): Promise<void> {
   if (active.has(projectId)) return
+  const filter = onlyIds && onlyIds.length ? new Set(onlyIds) : null
   const abort = new AbortController()
   active.set(projectId, { abort })
   setProjectStatus(projectId, 'running')
@@ -191,7 +164,10 @@ export async function startBatch(projectId: string): Promise<void> {
     const project = store().projects.find((p) => p.id === projectId)
     if (!project) return null
     const r = project.rows.find(
-      (x) => (x.status === 'pending' || x.status === 'error') && !claimed.has(x.id)
+      (x) =>
+        (x.status === 'pending' || x.status === 'error') &&
+        !claimed.has(x.id) &&
+        (!filter || filter.has(x.id))
     )
     if (!r) return null
     claimed.add(r.id)
@@ -264,4 +240,21 @@ export function retryFailed(projectId: string): number {
     }
   }
   return n
+}
+
+/** Reset specific rows to pending (run-selected / regenerate selected). */
+export function regenRows(projectId: string, rowIds: string[]): void {
+  for (const id of rowIds) {
+    setRow(projectId, id, { status: 'pending', error: undefined, filePath: undefined })
+  }
+}
+
+/** Reset ALL rows to pending (regenerate everything). */
+export function resetAll(projectId: string): number {
+  const p = store().projects.find((x) => x.id === projectId)
+  if (!p) return 0
+  for (const r of p.rows) {
+    setRow(projectId, r.id, { status: 'pending', error: undefined, filePath: undefined })
+  }
+  return p.rows.length
 }

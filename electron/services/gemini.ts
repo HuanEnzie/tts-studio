@@ -54,6 +54,7 @@ interface SynthOpts {
   proxyUrl?: string
   temperature?: number
   seed?: number
+  languageCode?: string
   /** abort the request after this many ms (0/undefined = no timeout) */
   timeoutMs?: number
   signal?: AbortSignal
@@ -86,7 +87,8 @@ export async function synthesize(opts: SynthOpts): Promise<SynthResult> {
       ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
       ...(opts.seed !== undefined ? { seed: opts.seed } : {}),
       speechConfig: {
-        voiceConfig: { prebuiltVoiceConfig: { voiceName: opts.voice } }
+        voiceConfig: { prebuiltVoiceConfig: { voiceName: opts.voice } },
+        ...(opts.languageCode ? { languageCode: opts.languageCode } : {})
       }
     }
   }

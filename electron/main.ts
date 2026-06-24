@@ -84,9 +84,39 @@ async function runSelfTest(): Promise<void> {
   }
 }
 
+// Dev-only integration test for row operations (add/duplicate/remove).
+async function runRowTest(): Promise<void> {
+  try {
+    const { store } = await import('./services/store')
+    const { addRows, duplicateRows, removeRows } = await import('./services/rowops')
+    const id = 'rowtest'
+    store().mutate((d) =>
+      d.projects.push({ id, name: 'rt', status: 'draft', settings: {} as never, rows: [], createdAt: 0, updatedAt: 0 })
+    )
+    addRows(id, ['a', 'b', 'c'])
+    const afterAdd = store().projects.find((x) => x.id === id)!.rows.length
+    const firstTwo = store().projects.find((x) => x.id === id)!.rows.slice(0, 2).map((r) => r.id)
+    duplicateRows(id, firstTwo)
+    const afterDup = store().projects.find((x) => x.id === id)!.rows.length
+    const delIds = store().projects.find((x) => x.id === id)!.rows.slice(0, 2).map((r) => r.id)
+    await removeRows(id, delIds)
+    const afterRemove = store().projects.find((x) => x.id === id)!.rows.length
+    const ok = afterAdd === 3 && afterDup === 5 && afterRemove === 3
+    console.log(`ROWTEST add=${afterAdd} dup=${afterDup} remove=${afterRemove} -> ${ok ? 'PASS' : 'FAIL'}`)
+    app.exit(ok ? 0 : 1)
+  } catch (e) {
+    console.log('ROWTEST FAIL: ' + (e as Error).message)
+    app.exit(1)
+  }
+}
+
 app.whenReady().then(async () => {
   if (process.env['SELFTEST_KEY']) {
     await runSelfTest()
+    return
+  }
+  if (process.env['ROWTEST']) {
+    await runRowTest()
     return
   }
   registerIpc()

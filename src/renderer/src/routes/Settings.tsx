@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { FolderOpen, Plus, Trash2, BookA, Plug, Loader2, CheckCircle2, XCircle, Bookmark } from 'lucide-react'
+import { FolderOpen, Plus, Trash2, BookA, Plug, Loader2, CheckCircle2, XCircle } from 'lucide-react'
 import { Button } from '../design/Button'
 import { Card } from '../design/Card'
 import { PageHeader } from '../design/PageHeader'
@@ -7,12 +7,11 @@ import { Field, Input, Select, Textarea } from '../design/Input'
 import { ipc } from '../lib/ipc'
 import { toast } from '../store/toast'
 import { buildFilename } from '@shared/filename'
-import { VOICES, TTS_MODELS, type AppSettings, type DictEntry, type VoicePreset } from '@shared/types'
+import { VOICES, TTS_MODELS, LANGS, type AppSettings, type DictEntry } from '@shared/types'
 
 export function Settings() {
   const [s, setS] = useState<AppSettings | null>(null)
   const [dict, setDict] = useState<DictEntry[]>([])
-  const [presets, setPresets] = useState<VoicePreset[]>([])
   const [testing, setTesting] = useState(false)
   const [testRes, setTestRes] = useState<{ ok: boolean; message: string } | null>(null)
 
@@ -32,7 +31,6 @@ export function Settings() {
   useEffect(() => {
     ipc.settings.get().then(setS)
     ipc.dict.list().then(setDict)
-    ipc.presets.list().then(setPresets)
   }, [])
 
   if (!s) return null
@@ -74,6 +72,8 @@ export function Settings() {
           <div className="w-36"><Field label="Timeout (giây)" hint="Hủy request treo"><Input type="number" value={s.requestTimeoutSec} onChange={(e) => patch({ requestTimeoutSec: Math.max(10, Number(e.target.value) || 120) })} /></Field></div>
           <div className="w-32"><Field label="Temperature mặc định" hint="Thấp = ổn định"><Input type="number" step="0.1" min="0" max="2" value={s.temperature} onChange={(e) => patch({ temperature: Math.max(0, Math.min(2, Number(e.target.value))) })} /></Field></div>
           <div className="w-32"><Field label="Seed mặc định" hint="Giữ tông"><Input type="number" value={s.seed} onChange={(e) => patch({ seed: Math.floor(Number(e.target.value) || 0) })} /></Field></div>
+          <div className="w-40"><Field label="Ngôn ngữ mặc định"><Select value={s.languageCode} onChange={(e) => patch({ languageCode: e.target.value })}>{LANGS.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}</Select></Field></div>
+          <div className="w-40"><Field label="Ký tự tách dòng" hint="Mặc định ###"><Input value={s.lineSeparator} onChange={(e) => patch({ lineSeparator: e.target.value })} /></Field></div>
         </div>
         <div className="grid grid-cols-2 gap-4">
           <Field label="Context mặc định (mô tả giọng)" hint="VD: giọng nam miền Bắc, truyền cảm, phù hợp TVC.">
@@ -91,37 +91,8 @@ export function Settings() {
           <div className="w-44"><Field label="Giá input $/1M token"><Input type="number" step="0.01" value={s.priceInputPerM} onChange={(e) => patch({ priceInputPerM: Math.max(0, Number(e.target.value) || 0) })} /></Field></div>
           <div className="w-44"><Field label="Giá audio $/1M token"><Input type="number" step="0.1" value={s.priceAudioPerM} onChange={(e) => patch({ priceAudioPerM: Math.max(0, Number(e.target.value) || 0) })} /></Field></div>
           <div className="w-48"><Field label="Trần chi tiêu/ngày ($)" hint="0 = không giới hạn"><Input type="number" step="0.5" value={s.dailyBudgetUsd} onChange={(e) => patch({ dailyBudgetUsd: Math.max(0, Number(e.target.value) || 0) })} /></Field></div>
-          <label className="flex cursor-pointer items-center gap-2 pb-2.5 text-sm text-ink-muted">
-            <input type="checkbox" checked={s.cacheEnabled} className="h-4 w-4 accent-[#7C5CFF]" onChange={(e) => patch({ cacheEnabled: e.target.checked })} />
-            Bỏ qua dòng trùng (cache)
-          </label>
         </div>
-        <p className="-mt-2 text-xs text-ink-faint">Key Free không tính phí. Key Paid tính theo token thật. Cache giúp khỏi trả tiền tạo lại nội dung y hệt.</p>
-      </Card>
-
-      <Card className="flex flex-col gap-4 p-5">
-        <div className="flex items-center justify-between">
-          <h3 className="flex items-center gap-2 text-sm font-semibold text-ink"><Bookmark className="h-4 w-4 text-ink-muted" /> Mẫu giọng (Preset)</h3>
-          <Button size="sm" variant="secondary" icon={<Plus className="h-3.5 w-3.5" />} onClick={async () => { const e = await ipc.presets.add({ name: 'Giọng mới', voice: s.defaultVoice, context: s.voiceInstruction, scene: s.scene, style: '', temperature: s.temperature, seed: s.seed }); setPresets([...presets, e]) }}>Thêm giọng</Button>
-        </div>
-        <p className="-mt-2 text-xs text-ink-faint">Mỗi giọng lưu kèm voice + context + scene + <b>temperature</b> + <b>seed</b> để áp 1 click cho dự án/Tạo nhanh và giữ tông đồng nhất.</p>
-        {presets.length === 0 ? (
-          <p className="py-3 text-center text-sm text-ink-faint">Chưa có giọng nào.</p>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {presets.map((pr) => (
-              <div key={pr.id} className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2">
-                <Input defaultValue={pr.name} className="w-32" onBlur={(e) => ipc.presets.update(pr.id, { name: e.target.value })} />
-                <Select defaultValue={pr.voice} className="w-28" onChange={(e) => ipc.presets.update(pr.id, { voice: e.target.value })}>{VOICES.map((v) => <option key={v} value={v}>{v}</option>)}</Select>
-                <Input defaultValue={pr.context} placeholder="Context" className="flex-1" onBlur={(e) => ipc.presets.update(pr.id, { context: e.target.value })} />
-                <Input defaultValue={pr.scene} placeholder="Scene" className="flex-1" onBlur={(e) => ipc.presets.update(pr.id, { scene: e.target.value })} />
-                <Input type="number" step="0.1" defaultValue={pr.temperature} title="temperature" className="w-16" onBlur={(e) => ipc.presets.update(pr.id, { temperature: Number(e.target.value) })} />
-                <Input type="number" defaultValue={pr.seed} title="seed" className="w-20" onBlur={(e) => ipc.presets.update(pr.id, { seed: Math.floor(Number(e.target.value) || 0) })} />
-                <button onClick={async () => { await ipc.presets.remove(pr.id); setPresets(presets.filter((x) => x.id !== pr.id)) }} className="rounded-lg p-1.5 text-ink-muted transition hover:bg-surface-hover hover:text-status-error"><Trash2 className="h-4 w-4" /></button>
-              </div>
-            ))}
-          </div>
-        )}
+        <p className="-mt-2 text-xs text-ink-faint">Key Free không tính phí. Key Paid tính theo token thật.</p>
       </Card>
 
       <Card className="flex flex-col gap-4 p-5">

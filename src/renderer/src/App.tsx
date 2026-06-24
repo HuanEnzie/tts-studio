@@ -11,19 +11,19 @@ import { toast } from './store/toast'
 import { ipc } from './lib/ipc'
 import { Projects } from './routes/Projects'
 import { ProjectDetail } from './routes/ProjectDetail'
-import { Quick } from './routes/Quick'
 import { Keys } from './routes/Keys'
+import { VoiceLibrary } from './routes/VoiceLibrary'
 import { Settings } from './routes/Settings'
 
 const pages: Record<Route, ComponentType> = {
   projects: Projects,
   project: ProjectDetail,
-  quick: Quick,
   keys: Keys,
+  library: VoiceLibrary,
   settings: Settings
 }
 
-const shortcutRoutes: Route[] = ['projects', 'quick', 'keys', 'settings']
+const shortcutRoutes: Route[] = ['projects', 'keys', 'library', 'settings']
 
 export default function App() {
   const route = useNav((s) => s.route)

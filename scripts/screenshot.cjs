@@ -23,8 +23,8 @@ async function shoot() {
   const steps = [
     ['projects', `window.__setRoute('projects')`],
     ['project', `window.__openProject('p1')`],
-    ['quick', `window.__setRoute('quick')`],
     ['keys', `window.__setRoute('keys')`],
+    ['library', `window.__setRoute('library')`],
     ['settings', `window.__setRoute('settings')`]
   ]
 

@@ -28,9 +28,9 @@ export function Modal({ open, onClose, title, children, footer, width = 480 }: M
             exit={{ opacity: 0, y: 16, scale: 0.97 }}
             transition={{ type: 'spring', stiffness: 380, damping: 30 }}
             style={{ width }}
-            className="glass relative z-10 rounded-2xl border border-border shadow-float"
+            className="glass relative z-10 flex max-h-[88vh] flex-col rounded-2xl border border-border shadow-float"
           >
-            <div className="flex items-center justify-between border-b border-border/60 px-5 py-4">
+            <div className="flex shrink-0 items-center justify-between border-b border-border/60 px-5 py-4">
               <h2 className="font-semibold tracking-tight">{title}</h2>
               <button
                 onClick={onClose}
@@ -39,9 +39,9 @@ export function Modal({ open, onClose, title, children, footer, width = 480 }: M
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="px-5 py-4">{children}</div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
             {footer && (
-              <div className="flex justify-end gap-2 border-t border-border/60 px-5 py-3">
+              <div className="flex shrink-0 justify-end gap-2 border-t border-border/60 px-5 py-3">
                 {footer}
               </div>
             )}

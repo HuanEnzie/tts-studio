@@ -1,13 +1,13 @@
 import { motion } from 'framer-motion'
-import { FolderKanban, Zap, KeyRound, Settings } from 'lucide-react'
+import { FolderKanban, KeyRound, Library, Settings } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useNav, type Route } from '../store/nav'
 import { cn } from '../design/cn'
 
 const items: { route: Route; label: string; icon: LucideIcon }[] = [
   { route: 'projects', label: 'Dự án', icon: FolderKanban },
-  { route: 'quick', label: 'Tạo nhanh', icon: Zap },
   { route: 'keys', label: 'API Keys', icon: KeyRound },
+  { route: 'library', label: 'Thư viện giọng', icon: Library },
   { route: 'settings', label: 'Cài đặt', icon: Settings }
 ]
 

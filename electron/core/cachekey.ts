@@ -10,10 +10,11 @@ export interface CacheInput {
   text: string
   temperature: number
   seed: number
+  languageCode: string
 }
 
 export function contentHash(o: CacheInput): string {
-  const s = [o.model, o.voice, o.context, o.scene, o.style, String(o.temperature), String(o.seed), o.text].join('')
+  const s = [o.model, o.voice, o.context, o.scene, o.style, String(o.temperature), String(o.seed), o.languageCode, o.text].join('')
   let h = 0x811c9dc5
   for (let i = 0; i < s.length; i++) {
     h ^= s.charCodeAt(i)

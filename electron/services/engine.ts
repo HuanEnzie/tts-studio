@@ -209,13 +209,13 @@ export interface SynthOneResult {
 export async function synthOne(
   text: string,
   voice: string,
-  opts: { temperature?: number; seed?: number; signal?: AbortSignal } = {}
+  opts: { temperature?: number; seed?: number; languageCode?: string; signal?: AbortSignal } = {}
 ): Promise<SynthOneResult> {
   const s = store()
   const model = s.settings.model
   const proxyUrl = s.settings.proxyUrl
   const timeoutMs = (s.settings.requestTimeoutSec || 120) * 1000
-  const { temperature, seed, signal } = opts
+  const { temperature, seed, languageCode, signal } = opts
 
   for (let attempt = 0; attempt < s.keys.length + 1; attempt++) {
     ensureFresh()
@@ -239,7 +239,7 @@ export async function synthOne(
     }
 
     try {
-      const r = await synthesize({ text, voice, model, apiKey, proxyUrl, temperature, seed, timeoutMs, signal })
+      const r = await synthesize({ text, voice, model, apiKey, proxyUrl, temperature, seed, languageCode, timeoutMs, signal })
       s.mutate((d) => {
         d.quota[picked.key.id].count += 1
       })

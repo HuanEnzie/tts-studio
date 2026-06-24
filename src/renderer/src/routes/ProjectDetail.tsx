@@ -2,22 +2,21 @@ import { useEffect, useMemo, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ChevronLeft, Play, Square, FolderInput, Plus, Upload, RefreshCw,
-  Pencil, Trash2, Volume2, Loader2, ListRestart, DollarSign, Bookmark
+  Trash2, Volume2, Loader2, ListRestart, DollarSign, Bookmark, Mic, Settings2, Copy
 } from 'lucide-react'
 import { Button } from '../design/Button'
 import { Badge, type Status } from '../design/Badge'
 import { Modal } from '../design/Modal'
-import { Field, Input, Textarea, Select } from '../design/Input'
+import { Field, Input, Textarea } from '../design/Input'
 import { EmptyState } from '../design/EmptyState'
 import { AudioPlayer } from '../components/AudioPlayer'
+import { ProjectConfigFields } from '../components/ProjectConfigFields'
 import { ipc } from '../lib/ipc'
 import { useProjects } from '../store/projects'
 import { useNav } from '../store/nav'
 import { useQuota } from '../store/quota'
 import { toast } from '../store/toast'
-import { parseLines, parseDelimited } from '@shared/csv'
-import { buildFilename } from '@shared/filename'
-import { VOICES, type Row, type RowStatus, type VoicePreset, type BatchEstimate } from '@shared/types'
+import { type Row, type RowStatus, type VoicePreset, type BatchEstimate, type ProjectSettings } from '@shared/types'
 
 const rowStatus: Record<RowStatus, Status> = {
   pending: 'pending', running: 'running', done: 'done', error: 'error'
@@ -30,13 +29,18 @@ export function ProjectDetail() {
   const refreshQuota = useQuota((s) => s.refresh)
   const [running, setRunning] = useState(false)
   const [importing, setImporting] = useState(false)
-  const [editing, setEditing] = useState<Row | null>(null)
   const [presets, setPresets] = useState<VoicePreset[]>([])
   const [confirmEst, setConfirmEst] = useState<BatchEstimate | null>(null)
+  const [pendingAction, setPendingAction] = useState<{ run: () => Promise<void> } | null>(null)
+  const [configOpen, setConfigOpen] = useState(false)
+  const [draft, setDraft] = useState<ProjectSettings | null>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [confirmDelete, setConfirmDelete] = useState<{ ids: string[]; label: string } | null>(null)
 
   useEffect(() => {
     if (projectId) loadProject(projectId)
     ipc.presets.list().then(setPresets)
+    setSelected(new Set())
   }, [projectId, loadProject])
 
   useEffect(() => {
@@ -52,73 +56,82 @@ export function ProjectDetail() {
   }
 
   const p = current
+  const cfg = p.settings
   const done = p.rows.filter((r) => r.status === 'done').length
   const total = p.rows.length
   const pending = p.rows.filter((r) => r.status === 'pending' || r.status === 'error').length
-
   const errorCount = p.rows.filter((r) => r.status === 'error').length
   const projectCost = p.rows.reduce((a, r) => a + (r.costUsd ?? 0), 0)
 
-  // estimate first, then confirm, then run
-  const askStart = async () => {
-    if (pending === 0) { toast.info('Không còn dòng nào cần tạo'); return }
-    const est = await ipc.batch.estimate(p.id)
-    setConfirmEst(est)
+  const selectedIds = p.rows.filter((r) => selected.has(r.id)).map((r) => r.id)
+  const allSelected = total > 0 && selectedIds.length === total
+  const toggleSel = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(p.rows.map((r) => r.id)))
+
+  // estimate -> confirm -> run (the action is stored and executed on confirm)
+  const askRun = async (rowIds: string[] | undefined, run: () => Promise<void>) => {
+    const est = await ipc.batch.estimate(p.id, rowIds)
+    if (est.requests === 0) { toast.info('Không có dòng nào để tạo'); return }
+    setPendingAction({ run }); setConfirmEst(est)
   }
-  const start = async () => {
-    setConfirmEst(null)
-    setRunning(true)
-    await ipc.batch.start(p.id)
+  const confirmRun = async () => {
+    const a = pendingAction
+    setConfirmEst(null); setPendingAction(null); setRunning(true)
+    if (a) await a.run()
   }
   const stop = async () => { await ipc.batch.stop(p.id); setRunning(false) }
 
-  const retryFailed = async () => {
-    const n = await ipc.batch.retryFailed(p.id)
+  const runPending = () => askRun(undefined, async () => { await ipc.batch.start(p.id) })
+  const runAll = () => askRun(p.rows.map((r) => r.id), async () => {
+    await ipc.batch.resetAll(p.id); await loadProject(p.id); await ipc.batch.start(p.id)
+  })
+  const runSelected = () => askRun(selectedIds, async () => {
+    await ipc.batch.regenRows(p.id, selectedIds); await loadProject(p.id); await ipc.batch.start(p.id, selectedIds)
+  })
+  const retryFailed = async () => { const n = await ipc.batch.retryFailed(p.id); await loadProject(p.id); if (n > 0) runPending() }
+  const duplicateSelected = async () => {
+    const n = selectedIds.length
+    try {
+      await ipc.projects.duplicateRows(p.id, selectedIds)
+      await loadProject(p.id); setSelected(new Set())
+      toast.success(`Đã nhân bản ${n} dòng`)
+    } catch (e) { toast.error('Nhân bản lỗi: ' + (e as Error).message) }
+  }
+  const doDelete = async () => {
+    const cd = confirmDelete
+    setConfirmDelete(null)
+    if (!cd) return
+    try {
+      await ipc.projects.removeRows(p.id, cd.ids)
+      await loadProject(p.id); setSelected(new Set())
+      toast.success('Đã xóa')
+    } catch (e) { toast.error('Xóa lỗi: ' + (e as Error).message) }
+  }
+  const saveTextInline = async (rowId: string, text: string) => {
+    await ipc.projects.updateRow(p.id, rowId, { text, status: 'pending', filePath: undefined })
     await loadProject(p.id)
-    if (n > 0) askStart()
   }
 
-  const applyPreset = async (id: string) => {
-    if (!id) return
-    await ipc.presets.apply(id, p.id)
-    await loadProject(p.id)
-    toast.success('Đã áp giọng từ thư viện')
+  const saveConfig = async () => {
+    if (draft) { await ipc.projects.update(p.id, draft); await loadProject(p.id) }
+    setConfigOpen(false)
+    toast.success('Đã lưu cấu hình giọng')
   }
-
   const saveToLibrary = async () => {
     await ipc.presets.add({
-      name: `${p.settings.voice} · seed ${p.settings.seed}`,
-      voice: p.settings.voice,
-      context: p.settings.voiceInstruction,
-      scene: p.settings.scene,
-      style: p.settings.style,
-      temperature: p.settings.temperature,
-      seed: p.settings.seed
+      name: `${cfg.voice} · seed ${cfg.seed}`, voice: cfg.voice, context: cfg.voiceInstruction,
+      scene: cfg.scene, style: cfg.style, languageCode: cfg.languageCode,
+      temperature: cfg.temperature, seed: cfg.seed
     })
     setPresets(await ipc.presets.list())
     toast.success('Đã lưu giọng vào thư viện')
   }
 
-  const update = async (settings: Partial<typeof p.settings>) => {
-    await ipc.projects.update(p.id, settings)
-    loadProject(p.id)
-  }
-
   const regen = async (row: Row) => {
-    await ipc.batch.regenRow(p.id, row.id)
-    await loadProject(p.id)
-    if (!running) start()
+    await ipc.batch.regenRows(p.id, [row.id]); await loadProject(p.id)
+    if (!running) await ipc.batch.start(p.id, [row.id])
   }
-
-  const removeRow = async (row: Row) => {
-    await ipc.projects.removeRow(p.id, row.id)
-    loadProject(p.id)
-  }
-
-  const filenamePreview = buildFilename(p.settings.filenameTemplate, {
-    date: '2026-06-13', datetime: '2026-06-13_142300',
-    project: p.name, index: 1, voice: p.settings.voice, text: p.rows[0]?.text ?? 'mẫu văn bản'
-  }) + '.' + p.settings.format
+  const removeRow = async (row: Row) => { await ipc.projects.removeRow(p.id, row.id); loadProject(p.id) }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -134,95 +147,68 @@ export function ProjectDetail() {
           </div>
         </div>
         {projectCost > 0 && (
-          <span className="tnum flex items-center gap-1 text-xs text-ink-muted" title="Chi phí dự án">
-            <DollarSign className="h-3.5 w-3.5" />{projectCost.toFixed(4)}
-          </span>
+          <span className="tnum flex items-center gap-1 text-xs text-ink-muted" title="Chi phí dự án"><DollarSign className="h-3.5 w-3.5" />{projectCost.toFixed(4)}</span>
         )}
         <Button variant="ghost" icon={<FolderInput className="h-4 w-4" />} onClick={() => ipc.sys.openProjectFolder(p.id)}>Folder</Button>
         {!running && errorCount > 0 && (
-          <Button variant="secondary" icon={<ListRestart className="h-4 w-4" />} onClick={retryFailed}>Tạo lại lỗi ({errorCount})</Button>
+          <Button variant="ghost" icon={<ListRestart className="h-4 w-4" />} onClick={retryFailed}>Lỗi ({errorCount})</Button>
+        )}
+        {!running && total > 0 && (
+          <Button variant="ghost" icon={<RefreshCw className="h-4 w-4" />} onClick={runAll}>Tạo lại tất cả</Button>
         )}
         {running ? (
           <Button variant="danger" icon={<Square className="h-4 w-4" />} onClick={stop}>Dừng</Button>
         ) : (
-          <Button variant="primary" icon={<Play className="h-4 w-4" />} onClick={askStart}>
-            Tạo {pending > 0 ? `(${pending})` : ''}
-          </Button>
+          <Button variant="primary" icon={<Play className="h-4 w-4" />} onClick={runPending}>Tạo {pending > 0 ? `(${pending})` : ''}</Button>
         )}
       </div>
 
-      {/* settings strip */}
-      <div className="flex flex-col gap-3 border-b border-border/60 bg-surface/40 px-7 py-3">
-        <div className="flex flex-wrap items-end gap-4">
-        <div className="w-40">
-          <Field label="Giọng mặc định">
-            <Select value={p.settings.voice} onChange={(e) => update({ voice: e.target.value })}>
-              {VOICES.map((v) => <option key={v} value={v}>{v}</option>)}
-            </Select>
-          </Field>
-        </div>
-        <div className="w-28">
-          <Field label="Định dạng">
-            <Select value={p.settings.format} onChange={(e) => update({ format: e.target.value as 'mp3' | 'wav' })}>
-              <option value="mp3">MP3</option>
-              <option value="wav">WAV</option>
-            </Select>
-          </Field>
-        </div>
-        <div className="w-28">
-          <Field label="Temperature" hint="Thấp = ổn định">
-            <Input type="number" step="0.1" min="0" max="2" value={p.settings.temperature} onChange={(e) => update({ temperature: Math.max(0, Math.min(2, Number(e.target.value))) })} />
-          </Field>
-        </div>
-        <div className="w-36">
-          <Field label="Seed (giữ tông)">
-            <div className="flex gap-1">
-              <Input type="number" value={p.settings.seed} onChange={(e) => update({ seed: Math.floor(Number(e.target.value) || 0) })} className="flex-1" />
-              <button title="Đổi seed ngẫu nhiên" onClick={() => update({ seed: Math.floor(Math.random() * 1e9) })} className="shrink-0 rounded-xl border border-border bg-surface px-2 text-sm text-ink-muted transition hover:text-ink">🎲</button>
-            </div>
-          </Field>
-        </div>
-        <div className="w-28">
-          <Field label="Trần $ dự án" hint="0 = không">
-            <Input type="number" step="0.1" value={p.settings.budgetUsd} onChange={(e) => update({ budgetUsd: Math.max(0, Number(e.target.value) || 0) })} />
-          </Field>
-        </div>
-        <div className="min-w-[200px] flex-1">
-          <Field label="Mẫu tên file" hint={<span className="text-ink-faint">Ví dụ: <span className="text-ink-muted">{filenamePreview}</span></span>}>
-            <Input value={p.settings.filenameTemplate} onChange={(e) => update({ filenameTemplate: e.target.value })} />
-          </Field>
-        </div>
-        <div className="w-44">
-          <Field label="Giọng từ thư viện">
-            <Select value="" onChange={(e) => applyPreset(e.target.value)}>
-              <option value="">{presets.length ? '— chọn giọng —' : '(thư viện trống)'}</option>
-              {presets.map((pr) => <option key={pr.id} value={pr.id}>{pr.name}</option>)}
-            </Select>
-          </Field>
-        </div>
-        <Button variant="ghost" icon={<Bookmark className="h-4 w-4" />} onClick={saveToLibrary}>Lưu giọng</Button>
+      {/* slim config toolbar */}
+      <div className="flex items-center gap-3 border-b border-border/60 bg-surface/40 px-7 py-2.5">
+        <button
+          onClick={() => { setDraft({ ...cfg }); setConfigOpen(true) }}
+          className="no-drag flex min-w-0 items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-left transition hover:border-border-strong"
+        >
+          <Mic className="h-4 w-4 shrink-0 text-accent-to" />
+          <span className="truncate text-sm text-ink">{cfg.voice}</span>
+          <span className="tnum hidden shrink-0 text-xs text-ink-faint sm:inline">· {cfg.languageCode} · seed {cfg.seed} · t{cfg.temperature}</span>
+          {(cfg.voiceInstruction || cfg.style) && <span className="hidden truncate text-xs text-ink-faint lg:inline">· {[cfg.style, cfg.voiceInstruction].filter(Boolean).join(' · ')}</span>}
+          <Settings2 className="ml-1 h-3.5 w-3.5 shrink-0 text-ink-faint" />
+        </button>
+        <Button variant="ghost" icon={<Bookmark className="h-4 w-4" />} onClick={saveToLibrary}>Lưu vào thư viện</Button>
+        <div className="flex-1" />
         <Button variant="secondary" icon={<Upload className="h-4 w-4" />} onClick={() => setImporting(true)}>Thêm dòng</Button>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Context — mô tả giọng (mọi dòng)" hint="Giữ cố định để đồng nhất. VD: giọng nam miền Bắc, truyền cảm.">
-            <Input value={p.settings.voiceInstruction} onChange={(e) => update({ voiceInstruction: e.target.value })} placeholder="Giọng nam miền Bắc, trầm ấm, truyền cảm…" />
-          </Field>
-          <Field label="Scene — bối cảnh (mọi dòng)" hint="VD: quảng cáo sôi động, kêu gọi mua ngay.">
-            <Input value={p.settings.scene} onChange={(e) => update({ scene: e.target.value })} placeholder="Quảng cáo sôi động, kêu gọi mua ngay…" />
-          </Field>
-        </div>
       </div>
 
       {/* rows */}
-      <div className="flex-1 overflow-y-auto px-7 py-5">
+      <div className="flex min-h-0 flex-1 flex-col px-7 py-4">
         {total === 0 ? (
-          <EmptyState icon={Plus} title="Chưa có dòng nào" hint="Thêm văn bản hoặc import CSV để bắt đầu." action={<Button variant="primary" icon={<Upload className="h-4 w-4" />} onClick={() => setImporting(true)}>Thêm dòng</Button>} />
+          <EmptyState icon={Plus} title="Chưa có dòng nào" hint="Bấm vào chip giọng để cấu hình, rồi Thêm dòng để dán nội dung." action={<Button variant="primary" icon={<Upload className="h-4 w-4" />} onClick={() => setImporting(true)}>Thêm dòng</Button>} />
         ) : (
-          <div className="flex flex-col gap-2">
-            {p.rows.map((r) => (
-              <RowItem key={r.id} row={r} onRegen={() => regen(r)} onEdit={() => setEditing(r)} onRemove={() => removeRow(r)} />
-            ))}
-          </div>
+          <>
+            <div className="mb-3 flex items-center gap-3">
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-muted">
+                <input type="checkbox" checked={allSelected} onChange={toggleAll} className="h-4 w-4 accent-[#7C5CFF]" />
+                Chọn tất cả
+              </label>
+              <div className="flex-1" />
+              {selectedIds.length > 0 ? (
+                <>
+                  <span className="mr-1 text-xs text-ink-faint">{selectedIds.length} đã chọn</span>
+                  {!running && <Button size="sm" variant="primary" icon={<Play className="h-3.5 w-3.5" />} onClick={runSelected}>Chạy ({selectedIds.length})</Button>}
+                  <Button size="sm" variant="secondary" icon={<Copy className="h-3.5 w-3.5" />} onClick={duplicateSelected}>Nhân bản</Button>
+                  <Button size="sm" variant="danger" icon={<Trash2 className="h-3.5 w-3.5" />} onClick={() => setConfirmDelete({ ids: selectedIds, label: `${selectedIds.length} dòng đã chọn` })}>Xóa ({selectedIds.length})</Button>
+                </>
+              ) : (
+                <Button size="sm" variant="ghost" className="text-status-error" icon={<Trash2 className="h-3.5 w-3.5" />} onClick={() => setConfirmDelete({ ids: p.rows.map((r) => r.id), label: `tất cả ${total} dòng` })}>Xóa tất cả</Button>
+              )}
+            </div>
+            <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
+              {p.rows.map((r) => (
+                <RowItem key={r.id} row={r} selected={selected.has(r.id)} onToggle={() => toggleSel(r.id)} onRegen={() => regen(r)} onSaveText={(t) => saveTextInline(r.id, t)} onRemove={() => removeRow(r)} />
+              ))}
+            </div>
+          </>
         )}
       </div>
 
@@ -232,27 +218,29 @@ export function ProjectDetail() {
         setImporting(false)
         toast.success(`Đã thêm ${rows.length} dòng`)
       }} />
-      <RowEditModal row={editing} voices={[...VOICES]} onClose={() => setEditing(null)} onSave={async (patch) => {
-        if (editing) {
-          await ipc.projects.updateRow(p.id, editing.id, { ...patch, status: 'pending', filePath: undefined })
-          await loadProject(p.id)
-        }
-        setEditing(null)
-      }} />
 
-      <Modal open={!!confirmEst} onClose={() => setConfirmEst(null)} title="Xác nhận tạo"
-        footer={<><Button variant="ghost" onClick={() => setConfirmEst(null)}>Hủy</Button><Button variant="primary" onClick={start}>Tạo {confirmEst?.requests} dòng</Button></>}>
+      <Modal open={!!confirmEst} onClose={() => { setConfirmEst(null); setPendingAction(null) }} title="Xác nhận tạo"
+        footer={<><Button variant="ghost" onClick={() => { setConfirmEst(null); setPendingAction(null) }}>Hủy</Button><Button variant="primary" onClick={confirmRun}>Tạo {confirmEst?.requests} dòng</Button></>}>
         {confirmEst && (
           <div className="flex flex-col gap-2 text-sm text-ink-muted">
             <div className="flex justify-between"><span>Số dòng cần tạo</span><span className="tnum text-ink">{confirmEst.requests}</span></div>
             <div className="flex justify-between"><span>Token (ước tính)</span><span className="tnum text-ink">{confirmEst.inputTokens.toLocaleString()} in · {confirmEst.outputTokens.toLocaleString()} audio</span></div>
-            <div className="flex justify-between"><span>Chi phí ước tính (nếu dùng key Paid)</span><span className="tnum font-semibold text-ink">${confirmEst.costUsd.toFixed(4)}</span></div>
-            <p className="mt-1 text-xs text-ink-faint">Dùng key Free thì miễn phí. Dòng đã có trong cache sẽ không tốn thêm.</p>
+            <div className="flex justify-between"><span>Chi phí ước tính (key Paid)</span><span className="tnum font-semibold text-ink">${confirmEst.costUsd.toFixed(4)}</span></div>
+            <p className="mt-1 text-xs text-ink-faint">Key Free miễn phí.</p>
           </div>
         )}
       </Modal>
 
-      {/* refresh quota when batch progresses */}
+      <Modal open={!!confirmDelete} onClose={() => setConfirmDelete(null)} title="Xóa dòng"
+        footer={<><Button variant="ghost" onClick={() => setConfirmDelete(null)}>Hủy</Button><Button variant="danger" onClick={doDelete}>Xóa</Button></>}>
+        <p className="text-sm text-ink-muted">Xóa <span className="font-medium text-ink">{confirmDelete?.label}</span> và các file âm thanh tương ứng? Hành động không thể hoàn tác.</p>
+      </Modal>
+
+      <Modal open={configOpen} onClose={() => setConfigOpen(false)} title="Cấu hình giọng đọc" width={560}
+        footer={<><Button variant="ghost" onClick={() => setConfigOpen(false)}>Hủy</Button><Button variant="primary" onClick={saveConfig}>Lưu</Button></>}>
+        {draft && <ProjectConfigFields value={draft} onChange={(patch) => setDraft({ ...draft, ...patch })} presets={presets} />}
+      </Modal>
+
       <QuotaSync trigger={done} onSync={refreshQuota} />
     </div>
   )
@@ -263,9 +251,11 @@ function QuotaSync({ trigger, onSync }: { trigger: number; onSync: () => void })
   return null
 }
 
-function RowItem({ row, onRegen, onEdit, onRemove }: { row: Row; onRegen: () => void; onEdit: () => void; onRemove: () => void }) {
+function RowItem({ row, selected, onToggle, onRegen, onSaveText, onRemove }: { row: Row; selected: boolean; onToggle: () => void; onRegen: () => void; onSaveText: (text: string) => void; onRemove: () => void }) {
   const [src, setSrc] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(row.text)
 
   const play = async () => {
     if (src || !row.filePath) return
@@ -275,24 +265,36 @@ function RowItem({ row, onRegen, onEdit, onRemove }: { row: Row; onRegen: () => 
       setSrc(`data:${mime};base64,${base64}`)
     } catch { toast.error('Không đọc được file audio') } finally { setLoading(false) }
   }
+  const startEdit = () => { setDraft(row.text); setEditing(true) }
+  const commit = () => { setEditing(false); if (draft.trim() && draft !== row.text) onSaveText(draft.trim()) }
 
   return (
-    <motion.div layout initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="rounded-xl border border-border bg-surface px-4 py-3">
+    <motion.div layout initial={{ opacity: 0 }} animate={{ opacity: 1 }} className={'rounded-xl border bg-surface px-4 py-3 ' + (selected ? 'border-accent-from/40' : 'border-border')}>
       <div className="flex items-center gap-3">
+        <input type="checkbox" checked={selected} onChange={onToggle} className="h-4 w-4 shrink-0 accent-[#7C5CFF]" />
         <span className="tnum w-7 shrink-0 text-xs text-ink-faint">{String(row.idx + 1).padStart(2, '0')}</span>
         <Badge status={rowStatus[row.status]} />
-        <p className="min-w-0 flex-1 truncate text-sm text-ink" title={row.text}>{row.text}</p>
-        {row.cached && <span className="shrink-0 rounded-md bg-accent-soft px-2 py-0.5 text-xs text-accent-to" title="Dùng lại từ cache, không tốn phí">cache</span>}
-        <span className="hidden shrink-0 rounded-md bg-surface-hover px-2 py-0.5 text-xs text-ink-muted sm:block">{row.voice}</span>
+        {editing ? (
+          <textarea
+            value={draft}
+            autoFocus
+            rows={1}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commit() } if (e.key === 'Escape') setEditing(false) }}
+            className="min-w-0 flex-1 resize-none rounded-lg border border-accent-from/50 bg-surface px-2 py-1 text-sm text-ink outline-none ring-2 ring-accent-from/20"
+          />
+        ) : (
+          <p onClick={startEdit} title="Bấm để sửa" className="min-w-0 flex-1 cursor-text truncate text-sm text-ink hover:text-white">{row.text}</p>
+        )}
         <div className="flex shrink-0 items-center gap-1">
           {row.status === 'done' && row.filePath && (
             <button onClick={play} title="Nghe" className="rounded-lg p-1.5 text-ink-muted transition hover:bg-surface-hover hover:text-ink">
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Volume2 className="h-4 w-4" />}
             </button>
           )}
-          <button onClick={onRegen} title="Tạo lại" className="rounded-lg p-1.5 text-ink-muted transition hover:bg-surface-hover hover:text-ink"><RefreshCw className="h-4 w-4" /></button>
-          <button onClick={onEdit} title="Sửa" className="rounded-lg p-1.5 text-ink-muted transition hover:bg-surface-hover hover:text-ink"><Pencil className="h-4 w-4" /></button>
-          <button onClick={onRemove} title="Xóa" className="rounded-lg p-1.5 text-ink-muted transition hover:bg-surface-hover hover:text-status-error"><Trash2 className="h-4 w-4" /></button>
+          <button onClick={onRegen} title="Tạo lại dòng này" className="rounded-lg p-1.5 text-ink-muted transition hover:bg-surface-hover hover:text-ink"><RefreshCw className="h-4 w-4" /></button>
+          <button onClick={onRemove} title="Xóa (xóa cả file)" className="rounded-lg p-1.5 text-ink-muted transition hover:bg-surface-hover hover:text-status-error"><Trash2 className="h-4 w-4" /></button>
         </div>
       </div>
       <AnimatePresence>
@@ -307,57 +309,50 @@ function RowItem({ row, onRegen, onEdit, onRemove }: { row: Row; onRegen: () => 
   )
 }
 
-function ImportModal({ open, onClose, onImport }: { open: boolean; onClose: () => void; onImport: (rows: { text: string; voice?: string; style?: string }[]) => void }) {
+function ImportModal({ open, onClose, onImport }: { open: boolean; onClose: () => void; onImport: (rows: { text: string }[]) => void }) {
   const [text, setText] = useState('')
-  const [mode, setMode] = useState<'lines' | 'csv'>('lines')
-  useEffect(() => { if (open) { setText(''); setMode('lines') } }, [open])
+  const [sep, setSep] = useState('###')
 
-  const importCsvFile = async () => {
-    const path = await ipc.sys.pickFile([{ name: 'CSV/TSV', extensions: ['csv', 'tsv', 'txt'] }])
+  useEffect(() => {
+    if (open) {
+      setText('')
+      ipc.settings.get().then((s) => setSep(s.lineSeparator || '###'))
+    }
+  }, [open])
+
+  const loadFile = async () => {
+    const path = await ipc.sys.pickFile([{ name: 'Text', extensions: ['txt', 'csv', 'md'] }])
     if (!path) return
     const content = await ipc.file.readText(path).catch(() => '')
     if (content) setText(content)
-    setMode('csv')
   }
 
   const rows = useMemo(() => {
-    if (mode === 'lines') return parseLines(text).map((t) => ({ text: t }))
-    const grid = parseDelimited(text)
-    // assume columns: text [, voice [, style]]; skip header if first cell looks like "text"
-    const body = grid.length && /text|văn bản|noi dung|nội dung/i.test(grid[0][0]) ? grid.slice(1) : grid
-    return body.map((r) => ({ text: r[0] ?? '', voice: r[1] || undefined, style: r[2] || undefined })).filter((r) => r.text.trim())
-  }, [text, mode])
+    const parts = sep.trim() ? text.split(sep) : text.split(/\r?\n/)
+    return parts.map((t) => t.trim()).filter(Boolean).map((t) => ({ text: t }))
+  }, [text, sep])
+
+  const doImport = () => {
+    ipc.settings.set({ lineSeparator: sep })
+    onImport(rows)
+  }
 
   return (
-    <Modal open={open} onClose={onClose} title="Thêm dòng" width={560}
-      footer={<><Button variant="ghost" onClick={onClose}>Hủy</Button><Button variant="primary" disabled={rows.length === 0} onClick={() => onImport(rows)}>Thêm {rows.length} dòng</Button></>}>
+    <Modal open={open} onClose={onClose} title="Thêm dòng" width={580}
+      footer={<><Button variant="ghost" onClick={onClose}>Hủy</Button><Button variant="primary" disabled={rows.length === 0} onClick={doImport}>Thêm {rows.length} dòng</Button></>}>
       <div className="flex flex-col gap-3">
-        <div className="flex gap-2">
-          <Button size="sm" variant={mode === 'lines' ? 'primary' : 'secondary'} onClick={() => setMode('lines')}>Mỗi dòng 1 sản phẩm</Button>
-          <Button size="sm" variant={mode === 'csv' ? 'primary' : 'secondary'} onClick={() => setMode('csv')}>CSV (text, voice, style)</Button>
-          <Button size="sm" variant="ghost" onClick={importCsvFile}>Chọn file…</Button>
+        <div className="flex items-end gap-3">
+          <div className="w-40">
+            <Field label="Ký tự tách dòng" hint="Để trống = tách theo xuống dòng">
+              <Input value={sep} onChange={(e) => setSep(e.target.value)} placeholder="###" />
+            </Field>
+          </div>
+          <Button size="md" variant="ghost" onClick={loadFile}>Chọn file…</Button>
+          <div className="flex-1" />
+          <span className="pb-2.5 text-xs text-ink-faint">{rows.length} dòng</span>
         </div>
-        <Textarea value={text} onChange={(e) => setText(e.target.value)} className="h-48 font-mono text-[13px]" placeholder={mode === 'lines' ? 'Mỗi dòng một câu...' : 'Văn bản,Kore,Đọc vui vẻ\nCâu khác,Puck,'} />
-        <p className="text-xs text-ink-faint">{rows.length} dòng hợp lệ sẽ được thêm.</p>
-      </div>
-    </Modal>
-  )
-}
-
-function RowEditModal({ row, voices, onClose, onSave }: { row: Row | null; voices: string[]; onClose: () => void; onSave: (patch: { text: string; voice: string; style: string }) => void }) {
-  const [text, setText] = useState('')
-  const [voice, setVoice] = useState('Kore')
-  const [style, setStyle] = useState('')
-  useEffect(() => { if (row) { setText(row.text); setVoice(row.voice); setStyle(row.style) } }, [row])
-  return (
-    <Modal open={!!row} onClose={onClose} title="Sửa dòng" width={520}
-      footer={<><Button variant="ghost" onClick={onClose}>Hủy</Button><Button variant="primary" onClick={() => onSave({ text, voice, style })}>Lưu & đặt lại</Button></>}>
-      <div className="flex flex-col gap-4">
-        <Field label="Văn bản"><Textarea value={text} onChange={(e) => setText(e.target.value)} className="h-28" /></Field>
-        <div className="flex gap-4">
-          <div className="flex-1"><Field label="Giọng"><Select value={voice} onChange={(e) => setVoice(e.target.value)}>{voices.map((v) => <option key={v} value={v}>{v}</option>)}</Select></Field></div>
-          <div className="flex-1"><Field label="Phong cách (tùy chọn)"><Input value={style} onChange={(e) => setStyle(e.target.value)} placeholder="Đọc vui vẻ" /></Field></div>
-        </div>
+        <Textarea value={text} onChange={(e) => setText(e.target.value)} className="h-56 font-mono text-[13px]" placeholder={'Nội dung dòng 1 (có thể nhiều câu)\n###\nNội dung dòng 2\n###\nNội dung dòng 3'} />
+        <p className="text-xs text-ink-faint">Mỗi dự án dùng 1 giọng (cấu hình ở trên). Mỗi đoạn cách nhau bằng "{sep || 'xuống dòng'}" sẽ thành 1 dòng.</p>
       </div>
     </Modal>
   )

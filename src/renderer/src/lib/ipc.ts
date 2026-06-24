@@ -86,15 +86,21 @@ export const ipc = {
       inv<Project | null>('projects:addRows', { id, rows }),
     updateRow: (id: string, rowId: string, patch: Partial<Row>) =>
       inv('projects:updateRow', { id, rowId, patch }),
-    removeRow: (id: string, rowId: string) => inv('projects:removeRow', { id, rowId })
+    removeRow: (id: string, rowId: string) => inv('projects:removeRow', { id, rowId }),
+    duplicateRows: (id: string, rowIds: string[]) =>
+      inv<Project | null>('projects:duplicateRows', { id, rowIds }),
+    removeRows: (id: string, rowIds: string[]) =>
+      inv<Project | null>('projects:removeRows', { id, rowIds })
   },
   batch: {
-    start: (id: string) => inv('batch:start', { id }),
+    start: (id: string, rowIds?: string[]) => inv('batch:start', { id, rowIds }),
     stop: (id: string) => inv('batch:stop', { id }),
     running: (id: string) => inv<boolean>('batch:running', { id }),
     regenRow: (id: string, rowId: string) => inv('batch:regenRow', { id, rowId }),
+    regenRows: (id: string, rowIds: string[]) => inv('batch:regenRows', { id, rowIds }),
+    resetAll: (id: string) => inv<number>('batch:resetAll', { id }),
     retryFailed: (id: string) => inv<number>('batch:retryFailed', { id }),
-    estimate: (id: string) => inv<BatchEstimate>('batch:estimate', { id }),
+    estimate: (id: string, rowIds?: string[]) => inv<BatchEstimate>('batch:estimate', { id, rowIds }),
     onUpdate: (cb: (u: BatchUpdate) => void) =>
       window.api.on('batch:update', (u) => cb(u as BatchUpdate))
   },

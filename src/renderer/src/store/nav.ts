@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type Route = 'projects' | 'project' | 'quick' | 'keys' | 'settings'
+export type Route = 'projects' | 'project' | 'keys' | 'library' | 'settings'
 
 interface NavState {
   route: Route

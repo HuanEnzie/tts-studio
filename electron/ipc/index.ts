@@ -17,6 +17,8 @@ import {
   startBatch,
   stopBatch,
   regenRow,
+  regenRows,
+  resetAll,
   retryFailed,
   batchEvents,
   isRunning
@@ -28,6 +30,7 @@ import { buildFilename, projectFolderName } from '../core/filename'
 import { buildSpokenPrompt } from '../core/prompt'
 import { applyDictionary } from '../core/dictionary'
 import { estimateBatch } from '../core/pricing'
+import { makeRow, addRows as addRowsOp, duplicateRows as dupRowsOp, removeRow as removeRowOp, removeRows as removeRowsOp } from '../services/rowops'
 import {
   DEFAULT_SETTINGS,
   type Project,
@@ -38,19 +41,7 @@ import {
   type VoicePreset
 } from '../core/types'
 
-type RowInput = { text: string; voice?: string; style?: string }
-
-function makeRow(idx: number, input: RowInput, defaults: ProjectSettings): Row {
-  return {
-    id: randomUUID(),
-    idx,
-    text: input.text,
-    voice: input.voice || defaults.voice,
-    style: input.style || '',
-    status: 'pending',
-    updatedAt: Date.now()
-  }
-}
+type RowInput = { text: string }
 
 function defaultProjectSettings(): ProjectSettings {
   const s = store().settings
@@ -59,6 +50,7 @@ function defaultProjectSettings(): ProjectSettings {
     style: s.defaultStyle,
     voiceInstruction: s.voiceInstruction,
     scene: s.scene,
+    languageCode: s.languageCode,
     temperature: s.temperature,
     seed: s.seed,
     format: s.format,
@@ -245,12 +237,17 @@ export function registerIpc(): void {
     const s = store()
     const settings = defaultProjectSettings()
     const id = randomUUID()
+    const name = p.name || 'Dự án không tên'
+    const date = pacificDateString(new Date())
+    // unique folder per project (id suffix) so same-name projects never collide
+    const outputDir = join(s.settings.outputRoot, `${projectFolderName(date, name)}-${id.slice(0, 6)}`)
     const project: Project = {
       id,
-      name: p.name || 'Dự án không tên',
+      name,
       status: 'draft',
+      outputDir,
       settings,
-      rows: (p.rows ?? []).map((r, i) => makeRow(i, r, settings)),
+      rows: (p.rows ?? []).map((r, i) => makeRow(i, r.text)),
       createdAt: Date.now(),
       updatedAt: Date.now()
     }
@@ -262,12 +259,14 @@ export function registerIpc(): void {
     const src = s.projects.find((x) => x.id === p.id)
     if (!src) return null
     const id = randomUUID()
+    const name = `${src.name} (sao chép)`
+    const date = pacificDateString(new Date())
     const copy: Project = {
       ...src,
       id,
-      name: `${src.name} (sao chép)`,
+      name,
       status: 'draft',
-      outputDir: undefined,
+      outputDir: join(s.settings.outputRoot, `${projectFolderName(date, name)}-${id.slice(0, 6)}`),
       rows: src.rows.map((r) => ({
         ...r,
         id: randomUUID(),
@@ -313,13 +312,15 @@ export function registerIpc(): void {
     })
   })
   h('projects:addRows', (p: { id: string; rows: RowInput[] }) => {
-    store().mutate((d) => {
-      const pr = d.projects.find((x) => x.id === p.id)
-      if (!pr) return
-      const start = pr.rows.length
-      pr.rows.push(...p.rows.map((r, i) => makeRow(start + i, r, pr.settings)))
-      pr.updatedAt = Date.now()
-    })
+    addRowsOp(p.id, p.rows.map((r) => r.text))
+    return store().projects.find((x) => x.id === p.id) ?? null
+  })
+  h('projects:duplicateRows', (p: { id: string; rowIds: string[] }) => {
+    dupRowsOp(p.id, p.rowIds)
+    return store().projects.find((x) => x.id === p.id) ?? null
+  })
+  h('projects:removeRows', async (p: { id: string; rowIds: string[] }) => {
+    await removeRowsOp(p.id, p.rowIds)
     return store().projects.find((x) => x.id === p.id) ?? null
   })
   h('projects:updateRow', (p: { id: string; rowId: string; patch: Partial<Row> }) => {
@@ -329,32 +330,33 @@ export function registerIpc(): void {
       if (r) Object.assign(r, p.patch, { updatedAt: Date.now() })
     })
   })
-  h('projects:removeRow', (p: { id: string; rowId: string }) => {
-    store().mutate((d) => {
-      const pr = d.projects.find((x) => x.id === p.id)
-      if (pr) {
-        pr.rows = pr.rows.filter((x) => x.id !== p.rowId)
-        pr.rows.forEach((r, i) => (r.idx = i))
-      }
-    })
-  })
+  h('projects:removeRow', (p: { id: string; rowId: string }) => removeRowOp(p.id, p.rowId))
 
   // ---- batch ----
-  h('batch:start', (p: { id: string }) => {
-    void startBatch(p.id)
+  h('batch:start', (p: { id: string; rowIds?: string[] }) => {
+    void startBatch(p.id, p.rowIds)
   })
   h('batch:stop', (p: { id: string }) => stopBatch(p.id))
   h('batch:running', (p: { id: string }) => isRunning(p.id))
   h('batch:regenRow', (p: { id: string; rowId: string }) => {
     regenRow(p.id, p.rowId)
   })
+  h('batch:regenRows', (p: { id: string; rowIds: string[] }) => {
+    regenRows(p.id, p.rowIds)
+  })
+  h('batch:resetAll', (p: { id: string }) => resetAll(p.id))
   h('batch:retryFailed', (p: { id: string }) => retryFailed(p.id))
-  h('batch:estimate', (p: { id: string }) => {
+  h('batch:estimate', (p: { id: string; rowIds?: string[] }) => {
     const s = store()
     const pr = s.projects.find((x) => x.id === p.id)
-    const pending = pr ? pr.rows.filter((r) => r.status === 'pending' || r.status === 'error') : []
+    const set = p.rowIds && p.rowIds.length ? new Set(p.rowIds) : null
+    const rows = pr
+      ? pr.rows.filter((r) =>
+          set ? set.has(r.id) : r.status === 'pending' || r.status === 'error'
+        )
+      : []
     return estimateBatch(
-      pending.map((r) => r.text),
+      rows.map((r) => r.text),
       s.settings.priceInputPerM,
       s.settings.priceAudioPerM
     )
@@ -365,7 +367,7 @@ export function registerIpc(): void {
 
   // ---- presets ----
   h('presets:list', () => store().presets)
-  h('presets:add', (p: { name: string; voice: string; context: string; scene: string; style: string; temperature: number; seed: number }) => {
+  h('presets:add', (p: { name: string; voice: string; context: string; scene: string; style: string; languageCode: string; temperature: number; seed: number }) => {
     const preset: VoicePreset = { id: randomUUID(), ...p }
     store().mutate((d) => d.presets.push(preset))
     return preset
@@ -390,6 +392,7 @@ export function registerIpc(): void {
         pr.settings.voiceInstruction = preset.context
         pr.settings.scene = preset.scene
         pr.settings.style = preset.style
+        pr.settings.languageCode = preset.languageCode
         pr.settings.temperature = preset.temperature
         pr.settings.seed = preset.seed
         pr.updatedAt = Date.now()

@@ -89,11 +89,13 @@ class Store {
         if (typeof p.settings.budgetUsd !== 'number') p.settings.budgetUsd = 0
         if (typeof p.settings.temperature !== 'number') p.settings.temperature = data.settings.temperature
         if (typeof p.settings.seed !== 'number') p.settings.seed = data.settings.seed
+        if (typeof p.settings.languageCode !== 'string') p.settings.languageCode = data.settings.languageCode
       }
-      // backfill preset temperature/seed
+      // backfill preset temperature/seed/languageCode
       for (const pr of data.presets) {
         if (typeof pr.temperature !== 'number') pr.temperature = data.settings.temperature
         if (typeof pr.seed !== 'number') pr.seed = data.settings.seed
+        if (typeof pr.languageCode !== 'string') pr.languageCode = data.settings.languageCode
       }
       // migrate keys: old 'free'|'paid' -> tier scheme; backfill banned
       const validTiers = ['free', 'tier1', 'tier2', 'tier3']

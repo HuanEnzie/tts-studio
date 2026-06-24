@@ -9,13 +9,13 @@ import { Badge, type Status } from '../design/Badge'
 import { PageHeader } from '../design/PageHeader'
 import { EmptyState } from '../design/EmptyState'
 import { Modal } from '../design/Modal'
-import { Field, Input, Textarea } from '../design/Input'
+import { Field, Input } from '../design/Input'
+import { ProjectConfigFields } from '../components/ProjectConfigFields'
 import { ipc } from '../lib/ipc'
 import { useProjects } from '../store/projects'
 import { useNav } from '../store/nav'
 import { toast } from '../store/toast'
-import { parseLines } from '@shared/csv'
-import type { Project } from '@shared/types'
+import type { Project, ProjectSettings, AppSettings, VoicePreset } from '@shared/types'
 
 const statusMap: Record<Project['status'], Status> = {
   draft: 'pending',
@@ -160,19 +160,38 @@ export function Projects() {
   )
 }
 
+function settingsFromDefaults(s: AppSettings): ProjectSettings {
+  return {
+    voice: s.defaultVoice,
+    style: s.defaultStyle,
+    voiceInstruction: s.voiceInstruction,
+    scene: s.scene,
+    languageCode: s.languageCode,
+    temperature: s.temperature,
+    seed: s.seed,
+    format: s.format,
+    filenameTemplate: s.filenameTemplate,
+    budgetUsd: 0
+  }
+}
+
 function CreateModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (id: string) => void }) {
   const [name, setName] = useState('')
-  const [paste, setPaste] = useState('')
+  const [draft, setDraft] = useState<ProjectSettings | null>(null)
+  const [presets, setPresets] = useState<VoicePreset[]>([])
+
   useEffect(() => {
     if (open) {
       setName(`Dự án ${new Date().toISOString().slice(0, 10)}`)
-      setPaste('')
+      ipc.settings.get().then((s) => setDraft(settingsFromDefaults(s)))
+      ipc.presets.list().then(setPresets)
     }
   }, [open])
 
   const create = async () => {
-    const rows = parseLines(paste).map((text) => ({ text }))
-    const p = await ipc.projects.create(name.trim() || 'Dự án không tên', rows)
+    if (!draft) return
+    const p = await ipc.projects.create(name.trim() || 'Dự án không tên')
+    await ipc.projects.update(p.id, draft)
     toast.success('Đã tạo dự án')
     onCreated(p.id)
   }
@@ -181,21 +200,21 @@ function CreateModal({ open, onClose, onCreated }: { open: boolean; onClose: () 
     <Modal
       open={open}
       onClose={onClose}
-      title="Dự án mới"
+      title="Dự án mới — cấu hình giọng"
+      width={560}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>Hủy</Button>
-          <Button variant="primary" onClick={create}>Tạo</Button>
+          <Button variant="primary" onClick={create}>Tạo dự án</Button>
         </>
       }
     >
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-3">
         <Field label="Tên dự án">
           <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
         </Field>
-        <Field label="Dán nội dung (mỗi dòng = 1 sản phẩm)" hint="Có thể để trống và thêm sau, hoặc import CSV trong dự án.">
-          <Textarea value={paste} onChange={(e) => setPaste(e.target.value)} className="h-32" placeholder={'Khuyến mãi mùa hè giảm 50%...\nƯu đãi mua 1 tặng 1...'} />
-        </Field>
+        <p className="-mt-1 text-xs text-ink-faint">Chọn/giấu cấu hình giọng cho cả dự án (1 dự án = 1 giọng). Đổi được sau ở nút cấu hình trong dự án.</p>
+        {draft && <ProjectConfigFields value={draft} onChange={(patch) => setDraft({ ...draft, ...patch })} presets={presets} />}
       </div>
     </Modal>
   )
