@@ -61,8 +61,7 @@ export const ipc = {
   },
   presets: {
     list: () => inv<VoicePreset[]>('presets:list'),
-    add: (name: string, voice: string, context: string, scene: string, style: string) =>
-      inv<VoicePreset>('presets:add', { name, voice, context, scene, style }),
+    add: (p: Omit<VoicePreset, 'id'>) => inv<VoicePreset>('presets:add', p),
     update: (id: string, patch: Partial<VoicePreset>) => inv('presets:update', { id, patch }),
     remove: (id: string) => inv('presets:remove', { id }),
     apply: (id: string, projectId: string) =>
@@ -100,8 +99,8 @@ export const ipc = {
       window.api.on('batch:update', (u) => cb(u as BatchUpdate))
   },
   quick: {
-    synth: (text: string, voice: string, style: string, instruction: string, scene: string) =>
-      inv<{ id: string; wavBase64: string; costUsd: number }>('quick:synth', { text, voice, style, instruction, scene }),
+    synth: (text: string, voice: string, style: string, instruction: string, scene: string, temperature: number, seed: number) =>
+      inv<{ id: string; wavBase64: string; costUsd: number }>('quick:synth', { text, voice, style, instruction, scene, temperature, seed }),
     save: (id: string, suggested: string, format: 'mp3' | 'wav') =>
       inv<string | null>('quick:save', { id, suggested, format })
   },

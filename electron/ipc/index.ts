@@ -59,6 +59,8 @@ function defaultProjectSettings(): ProjectSettings {
     style: s.defaultStyle,
     voiceInstruction: s.voiceInstruction,
     scene: s.scene,
+    temperature: s.temperature,
+    seed: s.seed,
     format: s.format,
     filenameTemplate: s.filenameTemplate,
     budgetUsd: 0
@@ -363,7 +365,7 @@ export function registerIpc(): void {
 
   // ---- presets ----
   h('presets:list', () => store().presets)
-  h('presets:add', (p: { name: string; voice: string; context: string; scene: string; style: string }) => {
+  h('presets:add', (p: { name: string; voice: string; context: string; scene: string; style: string; temperature: number; seed: number }) => {
     const preset: VoicePreset = { id: randomUUID(), ...p }
     store().mutate((d) => d.presets.push(preset))
     return preset
@@ -388,6 +390,8 @@ export function registerIpc(): void {
         pr.settings.voiceInstruction = preset.context
         pr.settings.scene = preset.scene
         pr.settings.style = preset.style
+        pr.settings.temperature = preset.temperature
+        pr.settings.seed = preset.seed
         pr.updatedAt = Date.now()
       }
     })
@@ -395,10 +399,10 @@ export function registerIpc(): void {
   })
 
   // ---- quick ----
-  h('quick:synth', async (p: { text: string; voice: string; style: string; instruction?: string; scene?: string }) => {
+  h('quick:synth', async (p: { text: string; voice: string; style: string; instruction?: string; scene?: string; temperature?: number; seed?: number }) => {
     const dictText = applyDictionary(p.text, store().dictionary)
     const text = buildSpokenPrompt({ instruction: p.instruction, scene: p.scene, style: p.style, text: dictText })
-    const r = await synthOne(text, p.voice)
+    const r = await synthOne(text, p.voice, { temperature: p.temperature, seed: p.seed })
     recordSpend(r.inputTokens, r.outputTokens, r.paid)
     const id = randomUUID()
     quickCache.set(id, r.pcm)

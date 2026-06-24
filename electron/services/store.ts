@@ -87,6 +87,13 @@ class Store {
         if (typeof p.settings.voiceInstruction !== 'string') p.settings.voiceInstruction = ''
         if (typeof p.settings.scene !== 'string') p.settings.scene = ''
         if (typeof p.settings.budgetUsd !== 'number') p.settings.budgetUsd = 0
+        if (typeof p.settings.temperature !== 'number') p.settings.temperature = data.settings.temperature
+        if (typeof p.settings.seed !== 'number') p.settings.seed = data.settings.seed
+      }
+      // backfill preset temperature/seed
+      for (const pr of data.presets) {
+        if (typeof pr.temperature !== 'number') pr.temperature = data.settings.temperature
+        if (typeof pr.seed !== 'number') pr.seed = data.settings.seed
       }
       // migrate keys: old 'free'|'paid' -> tier scheme; backfill banned
       const validTiers = ['free', 'tier1', 'tier2', 'tier3']

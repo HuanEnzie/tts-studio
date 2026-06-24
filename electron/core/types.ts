@@ -72,6 +72,10 @@ export interface ProjectSettings {
   voiceInstruction: string
   /** situational setting, e.g. "quảng cáo sôi động, kêu gọi mua ngay" (Scene) */
   scene: string
+  /** sampling temperature (lower = more consistent across rows) */
+  temperature: number
+  /** fixed RNG seed — keeps tone consistent across rows in this project */
+  seed: number
   format: 'mp3' | 'wav'
   filenameTemplate: string
   /** per-project spend cap in USD (0 = no cap) */
@@ -103,6 +107,8 @@ export interface VoicePreset {
   context: string // -> voiceInstruction
   scene: string
   style: string
+  temperature: number
+  seed: number
 }
 
 export interface AppSettings {
@@ -114,6 +120,10 @@ export interface AppSettings {
   voiceInstruction: string
   /** Default Scene used by Quick mode and seeded into new projects. */
   scene: string
+  /** default sampling temperature for new projects / Quick */
+  temperature: number
+  /** default seed for new projects / Quick */
+  seed: number
   filenameTemplate: string
   format: 'mp3' | 'wav'
   /** how many rows to generate in parallel */
@@ -183,6 +193,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultStyle: '',
   voiceInstruction: '',
   scene: '',
+  temperature: 1,
+  seed: 42,
   filenameTemplate: '{date}_{project}_{index}_{slug}',
   format: 'mp3',
   concurrency: 4,

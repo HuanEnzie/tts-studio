@@ -122,7 +122,9 @@ async function processRow(project: Project, row: Row, signal: AbortSignal): Prom
     text: row.text
   })
   const outPath = join(dir, `${base}.${ext}`)
-  const hash = contentHash({ model, voice, context, scene, style, text: dictText })
+  const temperature = project.settings.temperature
+  const seed = project.settings.seed
+  const hash = contentHash({ model, voice, context, scene, style, text: dictText, temperature, seed })
 
   // cache: reuse a prior identical clip instead of paying again
   if (s.settings.cacheEnabled) {
@@ -153,7 +155,7 @@ async function processRow(project: Project, row: Row, signal: AbortSignal): Prom
   }
 
   const prompt = buildSpokenPrompt({ instruction: context, scene, style, text: dictText })
-  const r = await synthOne(prompt, voice, signal)
+  const r = await synthOne(prompt, voice, { temperature, seed, signal })
   await writeAudio(r.pcm, outPath, ext)
   const cost = recordSpend(r.inputTokens, r.outputTokens, r.paid)
 

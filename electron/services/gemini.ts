@@ -52,6 +52,8 @@ interface SynthOpts {
   model: string
   apiKey: string
   proxyUrl?: string
+  temperature?: number
+  seed?: number
   /** abort the request after this many ms (0/undefined = no timeout) */
   timeoutMs?: number
   signal?: AbortSignal
@@ -81,6 +83,8 @@ export async function synthesize(opts: SynthOpts): Promise<SynthResult> {
     contents: [{ parts: [{ text: opts.text }] }],
     generationConfig: {
       responseModalities: ['AUDIO'],
+      ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+      ...(opts.seed !== undefined ? { seed: opts.seed } : {}),
       speechConfig: {
         voiceConfig: { prebuiltVoiceConfig: { voiceName: opts.voice } }
       }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ChevronLeft, Play, Square, FolderInput, Plus, Upload, RefreshCw,
-  Pencil, Trash2, Volume2, Loader2, ListRestart, DollarSign
+  Pencil, Trash2, Volume2, Loader2, ListRestart, DollarSign, Bookmark
 } from 'lucide-react'
 import { Button } from '../design/Button'
 import { Badge, type Status } from '../design/Badge'
@@ -82,7 +82,21 @@ export function ProjectDetail() {
     if (!id) return
     await ipc.presets.apply(id, p.id)
     await loadProject(p.id)
-    toast.success('Đã áp mẫu giọng')
+    toast.success('Đã áp giọng từ thư viện')
+  }
+
+  const saveToLibrary = async () => {
+    await ipc.presets.add({
+      name: `${p.settings.voice} · seed ${p.settings.seed}`,
+      voice: p.settings.voice,
+      context: p.settings.voiceInstruction,
+      scene: p.settings.scene,
+      style: p.settings.style,
+      temperature: p.settings.temperature,
+      seed: p.settings.seed
+    })
+    setPresets(await ipc.presets.list())
+    toast.success('Đã lưu giọng vào thư viện')
   }
 
   const update = async (settings: Partial<typeof p.settings>) => {
@@ -155,7 +169,20 @@ export function ProjectDetail() {
             </Select>
           </Field>
         </div>
-        <div className="w-32">
+        <div className="w-28">
+          <Field label="Temperature" hint="Thấp = ổn định">
+            <Input type="number" step="0.1" min="0" max="2" value={p.settings.temperature} onChange={(e) => update({ temperature: Math.max(0, Math.min(2, Number(e.target.value))) })} />
+          </Field>
+        </div>
+        <div className="w-36">
+          <Field label="Seed (giữ tông)">
+            <div className="flex gap-1">
+              <Input type="number" value={p.settings.seed} onChange={(e) => update({ seed: Math.floor(Number(e.target.value) || 0) })} className="flex-1" />
+              <button title="Đổi seed ngẫu nhiên" onClick={() => update({ seed: Math.floor(Math.random() * 1e9) })} className="shrink-0 rounded-xl border border-border bg-surface px-2 text-sm text-ink-muted transition hover:text-ink">🎲</button>
+            </div>
+          </Field>
+        </div>
+        <div className="w-28">
           <Field label="Trần $ dự án" hint="0 = không">
             <Input type="number" step="0.1" value={p.settings.budgetUsd} onChange={(e) => update({ budgetUsd: Math.max(0, Number(e.target.value) || 0) })} />
           </Field>
@@ -165,16 +192,15 @@ export function ProjectDetail() {
             <Input value={p.settings.filenameTemplate} onChange={(e) => update({ filenameTemplate: e.target.value })} />
           </Field>
         </div>
-        {presets.length > 0 && (
-          <div className="w-40">
-            <Field label="Áp mẫu giọng">
-              <Select value="" onChange={(e) => applyPreset(e.target.value)}>
-                <option value="">— chọn —</option>
-                {presets.map((pr) => <option key={pr.id} value={pr.id}>{pr.name}</option>)}
-              </Select>
-            </Field>
-          </div>
-        )}
+        <div className="w-44">
+          <Field label="Giọng từ thư viện">
+            <Select value="" onChange={(e) => applyPreset(e.target.value)}>
+              <option value="">{presets.length ? '— chọn giọng —' : '(thư viện trống)'}</option>
+              {presets.map((pr) => <option key={pr.id} value={pr.id}>{pr.name}</option>)}
+            </Select>
+          </Field>
+        </div>
+        <Button variant="ghost" icon={<Bookmark className="h-4 w-4" />} onClick={saveToLibrary}>Lưu giọng</Button>
         <Button variant="secondary" icon={<Upload className="h-4 w-4" />} onClick={() => setImporting(true)}>Thêm dòng</Button>
         </div>
         <div className="grid grid-cols-2 gap-3">

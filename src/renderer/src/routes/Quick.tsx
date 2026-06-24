@@ -20,6 +20,8 @@ export function Quick() {
   const [style, setStyle] = useState('')
   const [instruction, setInstruction] = useState('')
   const [scene, setScene] = useState('')
+  const [temperature, setTemperature] = useState(1)
+  const [seed, setSeed] = useState(42)
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<{ id: string; src: string; cost: number } | null>(null)
   const refreshQuota = useQuota((s) => s.refresh)
@@ -30,6 +32,8 @@ export function Quick() {
       setInstruction(s.voiceInstruction)
       setScene(s.scene)
       setVoice(s.defaultVoice)
+      setTemperature(s.temperature)
+      setSeed(s.seed)
     })
   }, [])
 
@@ -44,7 +48,7 @@ export function Quick() {
     setBusy(true)
     setResult(null)
     try {
-      const { id, wavBase64, costUsd } = await ipc.quick.synth(text, voice, style, instruction, scene)
+      const { id, wavBase64, costUsd } = await ipc.quick.synth(text, voice, style, instruction, scene, temperature, seed)
       setResult({ id, src: `data:audio/wav;base64,${wavBase64}`, cost: costUsd })
       refreshQuota()
     } catch (e) {
@@ -87,6 +91,15 @@ export function Quick() {
         </Field>
         <Field label="Scene — bối cảnh (lưu lại)" hint="VD: quảng cáo sôi động, kêu gọi mua ngay.">
           <Input value={scene} onChange={(e) => setScene(e.target.value)} onBlur={saveDefaults} placeholder="Quảng cáo sôi động, kêu gọi mua ngay…" />
+        </Field>
+        <Field label="Temperature" hint="Thấp = ổn định">
+          <Input type="number" step="0.1" min="0" max="2" value={temperature} onChange={(e) => setTemperature(Math.max(0, Math.min(2, Number(e.target.value))))} />
+        </Field>
+        <Field label="Seed (giữ tông)">
+          <div className="flex gap-1">
+            <Input type="number" value={seed} onChange={(e) => setSeed(Math.floor(Number(e.target.value) || 0))} className="flex-1" />
+            <button title="Đổi seed" onClick={() => setSeed(Math.floor(Math.random() * 1e9))} className="shrink-0 rounded-xl border border-border bg-surface px-2 text-sm text-ink-muted transition hover:text-ink">🎲</button>
+          </div>
         </Field>
       </div>
 
